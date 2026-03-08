@@ -10,7 +10,8 @@ Purpose: Actionable to-do list and planning document for next implementation pha
 2. Admin panels for user management (functional completeness)
 3. Mock small app with real auth/user management
 4. Make admin pages pretty + add UX features
-5. Add SSO
+5. Refactor module for portability (headless + themed UI)
+6. Add SSO
 
 ---
 
@@ -89,10 +90,29 @@ Polish is most valuable once core behavior and permissions are stable.
 
 ---
 
-## 5) Add SSO
+## 5) Refactor Module for Portability (Headless + Themed UI)
 
 ### Why This Is Fifth
-High integration complexity; best after core auth and admin workflows are stable.
+Critical for reuse in other apps with different design systems and branding.
+
+### To-Do Checklist
+- [ ] Separate headless logic (hooks/services/state) from presentational UI components.
+- [ ] Replace inline styles with CSS modules, theme tokens, or styled-system primitives.
+- [ ] Define component extension points (`className`, slots, render props, variant props).
+- [ ] Keep a default UI implementation for fast adoption while allowing full overrides.
+- [ ] Validate by integrating the module into a second demo app with different styling.
+
+### Done Criteria
+- Auth and user-management logic can run without bundled UI components.
+- A second app can apply a different visual style without forking module logic.
+- Default UI remains available as an optional starter layer.
+
+---
+
+## 6) Add SSO
+
+### Why This Is Sixth
+High integration complexity; best after core auth, admin workflows, and module portability are stable.
 
 ### To-Do Checklist
 - [ ] Choose SSO providers (Google Workspace, Azure AD, Okta, etc).
