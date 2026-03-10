@@ -170,12 +170,18 @@ async def sync_user(
     
     # Verify token and get payload
     try:
-        token_payload = verify_token(token)
+        token_payload = verify_token(token, allowed_token_uses=("access", "id"))
     except InvalidTokenError as e:
         raise e
     
     # Sync user to database
-    user = sync_user_from_cognito(token_payload, db)
+    try:
+        user = sync_user_from_cognito(token_payload, db)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
     
     return {
         "user_id": str(user.id),
@@ -747,31 +753,6 @@ async def delete_tenant_user(
     )
 
 
-@router.delete("/sessions/{session_id}")
-async def revoke_session(
-    session_id: UUID,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    """Revoke one active session that belongs to the current user."""
-    revoked = revoke_user_session(db, current_user.id, session_id)
-    if not revoked:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
-
-    log_audit_event(
-        "session_revoked",
-        actor_user_id=str(current_user.id),
-        session_id=str(session_id),
-    )
-
-    return {
-        "session_id": str(revoked.id),
-        "user_id": str(current_user.id),
-        "revoked_at": revoked.revoked_at.isoformat() if revoked.revoked_at else None,
-        "message": "Session revoked successfully",
-    }
-
-
 @router.delete("/sessions/all")
 async def revoke_all_sessions(
     current_user: User = Depends(get_current_user),
@@ -810,6 +791,31 @@ async def revoke_all_sessions(
         "revoked_count": revoked_count,
         "kept_session_id": str(keep_session_id) if keep_session_id else None,
         "message": "Session revocation completed",
+    }
+
+
+@router.delete("/sessions/{session_id}")
+async def revoke_session(
+    session_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Revoke one active session that belongs to the current user."""
+    revoked = revoke_user_session(db, current_user.id, session_id)
+    if not revoked:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
+
+    log_audit_event(
+        "session_revoked",
+        actor_user_id=str(current_user.id),
+        session_id=str(session_id),
+    )
+
+    return {
+        "session_id": str(revoked.id),
+        "user_id": str(current_user.id),
+        "revoked_at": revoked.revoked_at.isoformat() if revoked.revoked_at else None,
+        "message": "Session revoked successfully",
     }
 
 

@@ -43,7 +43,7 @@ def get_jwks() -> Dict:
         raise InvalidTokenError(f"Failed to fetch JWKS: {str(e)}")
 
 
-def verify_token(token: str) -> TokenPayload:
+def verify_token(token: str, allowed_token_uses: tuple[str, ...] = ("access",)) -> TokenPayload:
     """
     Verify Cognito JWT token and return payload
     
@@ -89,16 +89,42 @@ def verify_token(token: str) -> TokenPayload:
             token,
             matching_key,
             algorithms=["RS256"],
-            audience=settings.cognito_client_id,
             issuer=issuer,
             options={
                 "verify_signature": True,
                 "verify_exp": True,
-                "verify_aud": True,
+                "verify_aud": False,
                 "verify_iss": True,
                 "verify_at_hash": False
             }
         )
+
+        token_use = payload.get("token_use")
+        if token_use not in allowed_token_uses:
+            raise InvalidTokenError(
+                f"Invalid token_use '{token_use}'. Expected one of: {', '.join(allowed_token_uses)}"
+            )
+
+        # Cognito access tokens typically use client_id claim, while id tokens use aud.
+        expected_client_id = settings.cognito_client_id
+        audience_ok = False
+
+        if token_use == "access":
+            audience_ok = payload.get("client_id") == expected_client_id
+            aud_claim = payload.get("aud")
+            if not audience_ok and isinstance(aud_claim, str):
+                audience_ok = aud_claim == expected_client_id
+            if not audience_ok and isinstance(aud_claim, list):
+                audience_ok = expected_client_id in aud_claim
+        elif token_use == "id":
+            aud_claim = payload.get("aud")
+            if isinstance(aud_claim, str):
+                audience_ok = aud_claim == expected_client_id
+            elif isinstance(aud_claim, list):
+                audience_ok = expected_client_id in aud_claim
+
+        if not audience_ok:
+            raise InvalidTokenError("Token audience/client_id does not match configured app client")
         
         # Validate token payload structure
         return TokenPayload(**payload)
@@ -113,11 +139,11 @@ def verify_token(token: str) -> TokenPayload:
         raise InvalidTokenError(f"Token verification error: {str(e)}")
 
 
-def verify_token_optional(token: str | None) -> TokenPayload | None:
+def verify_token_optional(token: str | None, allowed_token_uses: tuple[str, ...] = ("access",)) -> TokenPayload | None:
     """
     Verify token if provided, return None if missing
     Useful for endpoints that support optional authentication
     """
     if not token:
         return None
-    return verify_token(token)
+    return verify_token(token, allowed_token_uses=allowed_token_uses)

@@ -12,14 +12,18 @@ import {
 
 export const AuthContext = createContext(null);
 
-const TOKEN_KEY = "trustos_id_token";
+const ACCESS_TOKEN_KEY = "trustos_access_token";
+const ID_TOKEN_KEY = "trustos_id_token";
 const REFRESH_TOKEN_KEY = "trustos_refresh_token";
 const TENANT_KEY = "trustos_tenant_id";
 const REFRESH_BEFORE_EXPIRY_MS = 5 * 60 * 1000; // 5 minutes
 const CHECK_INTERVAL_MS = 60 * 1000; // Check every minute
 
 export function AuthProvider({ children }) {
-  const [token, setToken] = useState(localStorage.getItem(TOKEN_KEY));
+  const [token, setToken] = useState(
+    localStorage.getItem(ACCESS_TOKEN_KEY) || localStorage.getItem(ID_TOKEN_KEY),
+  );
+  const [idToken, setIdToken] = useState(localStorage.getItem(ID_TOKEN_KEY));
   const [refreshToken, setRefreshToken] = useState(localStorage.getItem(REFRESH_TOKEN_KEY));
   const [user, setUser] = useState(null);
   const [tenants, setTenants] = useState([]);
@@ -43,16 +47,20 @@ export function AuthProvider({ children }) {
           try {
             setIsLoading(true);
             const tokens = await exchangeAuthCodeForTokens(authCode);
-            if (!tokens.id_token) {
-              throw new Error("Cognito token response missing id_token");
+            if (!tokens.access_token) {
+              throw new Error("Cognito token response missing access_token");
             }
 
-            localStorage.setItem(TOKEN_KEY, tokens.id_token);
+            localStorage.setItem(ACCESS_TOKEN_KEY, tokens.access_token);
+            setToken(tokens.access_token);
+            if (tokens.id_token) {
+              localStorage.setItem(ID_TOKEN_KEY, tokens.id_token);
+              setIdToken(tokens.id_token);
+            }
             if (tokens.refresh_token) {
               localStorage.setItem(REFRESH_TOKEN_KEY, tokens.refresh_token);
               setRefreshToken(tokens.refresh_token);
             }
-            setToken(tokens.id_token);
             setAuthError("");
           } catch (error) {
             setAuthError(error?.message || "Unable to exchange auth code");
@@ -67,12 +75,23 @@ export function AuthProvider({ children }) {
       }
 
       try {
-        await syncUser(token);
+        await syncUser(idToken || token);
         const me = await getCurrentUser(token);
-        const myTenants = await listMyTenants(token);
+        let myTenants = [];
+
+        try {
+          myTenants = await listMyTenants(token);
+        } catch (tenantError) {
+          const tenantDetail = tenantError?.response?.data?.detail;
+          setAuthError(
+            tenantDetail
+              ? `Signed in, but tenant list could not be loaded: ${tenantDetail}`
+              : "Signed in, but tenant list could not be loaded.",
+          );
+        }
 
         setUser(me);
-        setTenants(myTenants);
+        setTenants(Array.isArray(myTenants) ? myTenants : []);
 
         if (!tenantId && myTenants.length > 0) {
           const firstTenant = myTenants[0].id;
@@ -81,29 +100,41 @@ export function AuthProvider({ children }) {
         }
         setAuthError("");
 
-        // Check if we need to redirect after login (e.g., from invitation page)
+        // Redirect only to safe invitation paths and clear stale values.
         const redirectPath = localStorage.getItem('trustos_post_login_redirect');
-        if (redirectPath && redirectPath !== window.location.pathname) {
+        const isSafeInvitePath = typeof redirectPath === 'string' && /^\/invite\/[A-Za-z0-9_-]+$/.test(redirectPath);
+        if (isSafeInvitePath && redirectPath !== window.location.pathname) {
           localStorage.removeItem('trustos_post_login_redirect');
           window.location.href = redirectPath;
+          return;
+        }
+        if (redirectPath && !isSafeInvitePath) {
+          localStorage.removeItem('trustos_post_login_redirect');
         }
       } catch (error) {
-        localStorage.removeItem(TOKEN_KEY);
+        const authDetail = error?.response?.data?.detail;
+        localStorage.removeItem(ACCESS_TOKEN_KEY);
+        localStorage.removeItem(ID_TOKEN_KEY);
         localStorage.removeItem(REFRESH_TOKEN_KEY);
         localStorage.removeItem(TENANT_KEY);
         setToken(null);
+        setIdToken(null);
         setRefreshToken(null);
         setTenantId(null);
         setUser(null);
         setTenants([]);
-        setAuthError("Session invalid or expired. Please sign in again.");
+        setAuthError(
+          authDetail
+            ? `Session invalid or expired: ${authDetail}`
+            : "Session invalid or expired. Please sign in again.",
+        );
       } finally {
         setIsLoading(false);
       }
     }
 
     bootstrap();
-  }, [token]);
+  }, [token, idToken]);
 
   // Auto-refresh token before expiry
   useEffect(() => {
@@ -125,9 +156,13 @@ export function AuthProvider({ children }) {
       if (timeUntilExpiry <= REFRESH_BEFORE_EXPIRY_MS && timeUntilExpiry > 0) {
         try {
           const newTokens = await refreshTokens(refreshToken);
-          if (newTokens.id_token) {
-            localStorage.setItem(TOKEN_KEY, newTokens.id_token);
-            setToken(newTokens.id_token);
+          if (newTokens.access_token) {
+            localStorage.setItem(ACCESS_TOKEN_KEY, newTokens.access_token);
+            setToken(newTokens.access_token);
+            if (newTokens.id_token) {
+              localStorage.setItem(ID_TOKEN_KEY, newTokens.id_token);
+              setIdToken(newTokens.id_token);
+            }
             
             // Update refresh token if provided (Cognito may rotate it)
             if (newTokens.refresh_token) {
@@ -157,7 +192,7 @@ export function AuthProvider({ children }) {
   }, [token, refreshToken]);
 
   const loginWithToken = async (nextToken, nextRefreshToken = null) => {
-    localStorage.setItem(TOKEN_KEY, nextToken);
+    localStorage.setItem(ACCESS_TOKEN_KEY, nextToken);
     setToken(nextToken);
     if (nextRefreshToken) {
       localStorage.setItem(REFRESH_TOKEN_KEY, nextRefreshToken);
@@ -181,10 +216,13 @@ export function AuthProvider({ children }) {
       }
     }
 
-    localStorage.removeItem(TOKEN_KEY);
+    localStorage.removeItem(ACCESS_TOKEN_KEY);
+    localStorage.removeItem(ID_TOKEN_KEY);
     localStorage.removeItem(REFRESH_TOKEN_KEY);
     localStorage.removeItem(TENANT_KEY);
+    localStorage.removeItem('trustos_post_login_redirect');
     setToken(null);
+    setIdToken(null);
     setRefreshToken(null);
     setTenantId(null);
     setUser(null);

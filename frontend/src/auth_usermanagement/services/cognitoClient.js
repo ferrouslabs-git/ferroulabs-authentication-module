@@ -60,6 +60,30 @@ export async function openHostedLogin() {
   window.location.href = url;
 }
 
+export async function getHostedSignupUrl() {
+  assertAuthConfig();
+
+  const codeVerifier = generateCodeVerifier();
+  const codeChallenge = await generateCodeChallenge(codeVerifier);
+  sessionStorage.setItem(CODE_VERIFIER_KEY, codeVerifier);
+
+  const params = new URLSearchParams({
+    client_id: clientId,
+    response_type: "code",
+    redirect_uri: redirectUri,
+    scope: "email openid",
+    code_challenge_method: "S256",
+    code_challenge: codeChallenge,
+  });
+
+  return `${cognitoDomain}/signup?${params.toString()}`;
+}
+
+export async function openHostedSignup() {
+  const url = await getHostedSignupUrl();
+  window.location.href = url;
+}
+
 export function getCodeFromUrl() {
   const params = new URLSearchParams(window.location.search);
   return params.get("code");
@@ -160,6 +184,13 @@ export function decodeJwt(token) {
 export function logoutFromCognito() {
   assertAuthConfig();
 
-  const logoutUrl = `${cognitoDomain}/logout?client_id=${clientId}&logout_uri=${encodeURIComponent(redirectUri.replace('/callback', ''))}`;
+  // Cognito matches sign-out URLs strictly, so keep a stable trailing slash.
+  const logoutRedirectUri = redirectUri.replace('/callback', '/');
+  console.info("[auth] Redirecting to Cognito logout", {
+    cognitoDomain,
+    clientId,
+    logoutRedirectUri,
+  });
+  const logoutUrl = `${cognitoDomain}/logout?client_id=${clientId}&logout_uri=${encodeURIComponent(logoutRedirectUri)}`;
   window.location.href = logoutUrl;
 }

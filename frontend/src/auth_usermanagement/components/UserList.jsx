@@ -120,6 +120,18 @@ export function UserList({ className, canManage: canManageProp }) {
     return sortConfig.direction === "asc" ? "ascending" : "descending";
   };
 
+  const formatLastLogin = (user) => {
+    const raw = user.last_login || user.last_seen_at || user.updated_at || null;
+    if (!raw) {
+      return "-";
+    }
+    const dt = new Date(raw);
+    if (Number.isNaN(dt.getTime())) {
+      return "-";
+    }
+    return dt.toLocaleString();
+  };
+
   const handleRoleChange = async (userId, role) => {
     const user = users.find(u => u.user_id === userId);
     setProcessingUserId(userId);
@@ -364,6 +376,7 @@ export function UserList({ className, canManage: canManageProp }) {
                     )}
                   </div>
                   <div><strong>Status:</strong> {u.status}</div>
+                  <div><strong>Last Login:</strong> {formatLastLogin(u)}</div>
                   {isPlatformAdmin ? (
                     <div>
                       <strong>Account:</strong>{" "}
@@ -432,6 +445,7 @@ export function UserList({ className, canManage: canManageProp }) {
                     </button>
                   </th>
                   <th align="left">Status</th>
+                  <th align="left">Last Login</th>
                   {isPlatformAdmin ? <th align="left">Account Status</th> : null}
                   {canManage || isPlatformAdmin ? <th align="left">Actions</th> : null}
                 </tr>
@@ -457,6 +471,7 @@ export function UserList({ className, canManage: canManageProp }) {
                         )}
                       </td>
                       <td>{u.status}</td>
+                      <td>{formatLastLogin(u)}</td>
                       {isPlatformAdmin ? (
                         <td>
                           <span style={{ color: u.is_active ? "#2e7d32" : "#b00020" }}>

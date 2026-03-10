@@ -21,6 +21,9 @@ def sync_user_from_cognito(token_payload: TokenPayload, db: Session) -> User:
     Creates new user if doesn't exist, updates if exists.
     Idempotent - safe to call multiple times.
     
+    Handles edge case where Cognito user was deleted/recreated with same email
+    but different cognito_sub by updating the existing DB user's cognito_sub.
+    
     Args:
         token_payload: JWT token payload from Cognito
         db: Database session
@@ -28,26 +31,41 @@ def sync_user_from_cognito(token_payload: TokenPayload, db: Session) -> User:
     Returns:
         User: Created or existing user
     """
-    # Check if user already exists
+    if not token_payload.email:
+        raise ValueError("Token missing email claim for user provisioning")
+    
+    # Check if user already exists by cognito_sub
     user = get_user_by_cognito_sub(token_payload.sub, db)
     
     if user:
         # Update existing user (in case email or name changed in Cognito)
-        user.email = token_payload.email
+        if token_payload.email:
+            user.email = token_payload.email
         if token_payload.name:
             user.name = token_payload.name
         db.commit()
         db.refresh(user)
     else:
-        # Create new user
-        user = User(
-            cognito_sub=token_payload.sub,
-            email=token_payload.email,
-            name=token_payload.name if token_payload.name else None
-        )
-        db.add(user)
-        db.commit()
-        db.refresh(user)
+        # Check if user exists by email (handles Cognito user recreation)
+        user = get_user_by_email(token_payload.email, db)
+        
+        if user:
+            # Update cognito_sub for existing email-matched user
+            user.cognito_sub = token_payload.sub
+            if token_payload.name:
+                user.name = token_payload.name
+            db.commit()
+            db.refresh(user)
+        else:
+            # Create new user
+            user = User(
+                cognito_sub=token_payload.sub,
+                email=token_payload.email,
+                name=token_payload.name if token_payload.name else None
+            )
+            db.add(user)
+            db.commit()
+            db.refresh(user)
     
     return user
 

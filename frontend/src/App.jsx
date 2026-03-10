@@ -1,138 +1,261 @@
-import React from 'react'
-import { BrowserRouter, Routes, Route, Link, useLocation } from 'react-router-dom'
-import { AuthProvider } from './auth_usermanagement/context/AuthProvider'
-import { ToastProvider } from './auth_usermanagement/components/Toast'
-import { useAuth } from './auth_usermanagement/hooks/useAuth'
-import { LoginForm } from './auth_usermanagement/components/LoginForm'
-import { TenantSwitcher } from './auth_usermanagement/components/TenantSwitcher'
-import { UserList } from './auth_usermanagement/components/UserList'
-import { InviteUserModal } from './auth_usermanagement/components/InviteUserModal'
-import { AcceptInvitation } from './auth_usermanagement/components/AcceptInvitation'
-import { useRole } from './auth_usermanagement/hooks/useRole'
-import { AdminDashboard } from './auth_usermanagement/pages/AdminDashboard'
-import { PERMISSIONS, checkPermission } from './auth_usermanagement/constants/permissions'
+import { useState } from 'react'
+import { Navigate, Route, Routes, useNavigate } from 'react-router-dom'
+import { useAuth } from './auth_usermanagement'
+import { openHostedLogin, openHostedSignup } from './auth_usermanagement/services/cognitoClient'
 
-function Dashboard() {
-  const { user, logout } = useAuth()
-  const { canManage } = useRole()
-  const location = useLocation()
-  const [showInvite, setShowInvite] = React.useState(false)
-  const canAccessAdmin = checkPermission(user, PERMISSIONS.REMOVE_USERS) || user?.is_platform_admin
+function Shell({ children }) {
+  const { isAuthenticated, isLoading, logout } = useAuth()
+  const navigate = useNavigate()
+  const [isSignInRedirecting, setIsSignInRedirecting] = useState(false)
+  const [isSignUpRedirecting, setIsSignUpRedirecting] = useState(false)
+
+  const handleSignIn = async () => {
+    setIsSignInRedirecting(true)
+    try {
+      await openHostedLogin()
+    } catch (_error) {
+      setIsSignInRedirecting(false)
+    }
+  }
+
+  const handleSignUp = async () => {
+    setIsSignUpRedirecting(true)
+    try {
+      await openHostedSignup()
+    } catch (_error) {
+      setIsSignUpRedirecting(false)
+    }
+  }
+
+  const handleSignOut = async () => {
+    await logout()
+  }
+
+  const handleHome = () => {
+    navigate(isAuthenticated ? '/dashboard' : '/')
+  }
 
   return (
-    <div style={{ padding: '20px', fontFamily: 'system-ui' }}>
-      <header style={{ marginBottom: '20px', borderBottom: '2px solid #333', paddingBottom: '10px' }}>
-        <h1 style={{ margin: 0 }}>🔐 Auth Module Sandbox Test</h1>
-        <p style={{ color: '#666', margin: '5px 0' }}>Testing portability of auth_usermanagement module</p>
-        <nav style={{ marginTop: '12px', display: 'flex', gap: '16px', fontSize: '14px' }}>
-          <Link 
-            to="/" 
-            style={{ 
-              color: location.pathname === '/' ? '#0066cc' : '#666',
-              textDecoration: 'none',
-              fontWeight: location.pathname === '/' ? '600' : '400'
-            }}
+    <div style={styles.appFrame}>
+      <aside style={styles.sidebar}>
+        <div>
+          <h1 style={styles.logo}>FerrousLabs</h1>
+          <p style={styles.sidebarText}>Authentication Demo</p>
+        </div>
+
+        <div style={styles.sidebarActions}>
+          <button
+            type="button"
+            style={styles.homeButton}
+            onClick={handleHome}
+            disabled={isLoading}
           >
             Home
-          </Link>
-          {canAccessAdmin && (
-            <Link 
-              to="/admin" 
-              style={{ 
-                color: location.pathname === '/admin' ? '#0066cc' : '#666',
-                textDecoration: 'none',
-                fontWeight: location.pathname === '/admin' ? '600' : '400'
-              }}
-            >
-              Admin Dashboard
-            </Link>
-          )}
-        </nav>
-      </header>
-
-      <div style={{ marginBottom: '20px', display: 'flex', gap: '20px', alignItems: 'center' }}>
-        <div>
-          <strong>User:</strong> {user?.email}
-        </div>
-        <TenantSwitcher />
-        <button onClick={logout} style={{ marginLeft: 'auto', padding: '8px 16px' }}>
-          Logout
-        </button>
-      </div>
-
-      <div style={{ marginBottom: '20px' }}>
-        {canManage && (
-          <button 
-            onClick={() => setShowInvite(true)}
-            style={{ padding: '10px 20px', backgroundColor: '#0066cc', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
-          >
-            Invite Team Member
           </button>
-        )}
-      </div>
 
-      <UserList canManage={canManage} />
+          {!isAuthenticated ? (
+            <>
+              <button
+                type="button"
+                style={styles.signInButton}
+                onClick={handleSignIn}
+                disabled={isLoading || isSignInRedirecting || isSignUpRedirecting}
+              >
+                {isSignInRedirecting ? 'Redirecting...' : 'Sign In'}
+              </button>
+              <button
+                type="button"
+                style={styles.signUpButton}
+                onClick={handleSignUp}
+                disabled={isLoading || isSignInRedirecting || isSignUpRedirecting}
+              >
+                {isSignUpRedirecting ? 'Redirecting...' : 'Sign Up'}
+              </button>
+            </>
+          ) : (
+            <button
+              type="button"
+              style={styles.signOutButton}
+              onClick={handleSignOut}
+              disabled={isLoading}
+            >
+              Sign Out
+            </button>
+          )}
+        </div>
+      </aside>
 
-      {showInvite && (
-        <InviteUserModal
-          onClose={() => setShowInvite(false)}
-          onSuccess={() => {
-            setShowInvite(false)
-            window.location.reload()
-          }}
-        />
-      )}
+      <main style={styles.mainContent}>{children}</main>
+    </div>
+  )
+}
+
+function LandingPage() {
+  return (
+    <div style={styles.heroCard}>
+      <p style={styles.kicker}>Welcome</p>
+      <h2 style={styles.heroTitle}>Welcome to FerrousLab Authentication and User Management System</h2>
+      <p style={styles.heroBody}>
+        Secure sign-in, tenant-aware permissions, and invitation workflows in one reusable module.
+      </p>
+    </div>
+  )
+}
+
+function DashboardPage() {
+  const { user } = useAuth()
+  const userName = user?.email ? user.email.split('@')[0] : 'user'
+
+  return (
+    <div style={styles.heroCard}>
+      <p style={styles.kicker}>Dashboard</p>
+      <h2 style={styles.heroTitle}>Hi {userName}</h2>
+      <p style={styles.heroBody}>You are signed in and viewing the authenticated page.</p>
+    </div>
+  )
+}
+
+function CallbackPage() {
+  const { isAuthenticated, isLoading } = useAuth()
+
+  if (isAuthenticated) {
+    return <Navigate to="/dashboard" replace />
+  }
+
+  return (
+    <div style={styles.heroCard}>
+      <p style={styles.kicker}>Signing In</p>
+      <h2 style={styles.heroTitle}>Completing Sign In...</h2>
+      <p style={styles.heroBody}>{isLoading ? 'Please wait while we finalize your session.' : 'Redirecting...'}</p>
     </div>
   )
 }
 
 function App() {
-  const { user, isLoading } = useAuth()
+  const { isAuthenticated } = useAuth()
 
-  if (isLoading) {
-    return (
-      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
-        <div>Loading...</div>
-      </div>
-    )
-  }
-
-  if (!user) {
-    return (
-      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', backgroundColor: '#f5f5f5' }}>
-        <div style={{ backgroundColor: 'white', padding: '40px', borderRadius: '8px', boxShadow: '0 2px 10px rgba(0,0,0,0.1)', maxWidth: '400px', width: '100%' }}>
-          <h1 style={{ textAlign: 'center', marginBottom: '30px' }}>Auth Sandbox</h1>
-          <LoginForm 
-            onSuccess={() => {}}
-            renderHeader={() => <p style={{ textAlign: 'center', color: '#666' }}>Sign in to test the auth module</p>}
-          />
-        </div>
-      </div>
-    )
-  }
-
-  // User is authenticated, render routes
   return (
     <Routes>
-      <Route path="/admin" element={<AdminDashboard />} />
-      <Route path="/" element={<Dashboard />} />
+      <Route
+        path="/"
+        element={<Shell>{isAuthenticated ? <Navigate to="/dashboard" replace /> : <LandingPage />}</Shell>}
+      />
+      <Route
+        path="/dashboard"
+        element={<Shell>{isAuthenticated ? <DashboardPage /> : <Navigate to="/" replace />}</Shell>}
+      />
+      <Route path="/callback" element={<Shell><CallbackPage /></Shell>} />
+      <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   )
 }
 
-function AppWrapper() {
-  return (
-    <BrowserRouter>
-      <AuthProvider>
-        <ToastProvider>
-          <Routes>
-            <Route path="/invite/:token" element={<AcceptInvitation />} />
-            <Route path="/*" element={<App />} />
-          </Routes>
-        </ToastProvider>
-      </AuthProvider>
-    </BrowserRouter>
-  )
+const styles = {
+  appFrame: {
+    minHeight: '100vh',
+    display: 'flex',
+    background: 'radial-gradient(circle at 20% 20%, #f8d9b6 0%, #f4efe4 30%, #d8e6ef 100%)',
+    fontFamily: '"Trebuchet MS", "Segoe UI", sans-serif',
+  },
+  sidebar: {
+    width: '280px',
+    background: 'linear-gradient(180deg, #0f3443 0%, #1f5f73 100%)',
+    color: '#f7fbff',
+    padding: '28px 20px',
+    display: 'flex',
+    flexDirection: 'column',
+    justifyContent: 'space-between',
+  },
+  logo: {
+    margin: 0,
+    fontSize: '1.6rem',
+    letterSpacing: '0.04em',
+  },
+  sidebarText: {
+    marginTop: '8px',
+    opacity: 0.85,
+  },
+  sidebarActions: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '12px',
+  },
+  homeButton: {
+    width: '100%',
+    padding: '12px 14px',
+    borderRadius: '10px',
+    border: '1px solid rgba(255, 255, 255, 0.25)',
+    background: 'rgba(255, 255, 255, 0.08)',
+    color: '#f7fbff',
+    fontWeight: 600,
+    cursor: 'pointer',
+  },
+  signInButton: {
+    width: '100%',
+    padding: '12px 14px',
+    borderRadius: '10px',
+    border: 'none',
+    background: '#ffd166',
+    color: '#182026',
+    fontWeight: 700,
+    cursor: 'pointer',
+  },
+  signUpButton: {
+    width: '100%',
+    padding: '12px 14px',
+    borderRadius: '10px',
+    border: '1px solid rgba(255, 209, 102, 0.85)',
+    background: 'rgba(255, 209, 102, 0.12)',
+    color: '#fff3d0',
+    fontWeight: 700,
+    cursor: 'pointer',
+  },
+  signOutButton: {
+    width: '100%',
+    padding: '12px 14px',
+    borderRadius: '10px',
+    border: '1px solid rgba(255, 255, 255, 0.35)',
+    background: 'rgba(255, 255, 255, 0.16)',
+    color: '#f7fbff',
+    fontWeight: 700,
+    cursor: 'pointer',
+  },
+  mainContent: {
+    flex: 1,
+    padding: '28px',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  heroCard: {
+    width: 'min(860px, 100%)',
+    background: 'rgba(255, 255, 255, 0.76)',
+    border: '1px solid rgba(15, 52, 67, 0.12)',
+    boxShadow: '0 22px 44px rgba(15, 52, 67, 0.18)',
+    borderRadius: '20px',
+    padding: '32px',
+  },
+  kicker: {
+    margin: 0,
+    color: '#1f5f73',
+    fontWeight: 700,
+    letterSpacing: '0.07em',
+    textTransform: 'uppercase',
+    fontSize: '0.78rem',
+  },
+  heroTitle: {
+    marginTop: '10px',
+    marginBottom: '14px',
+    fontSize: '2.1rem',
+    color: '#0f3443',
+    lineHeight: 1.2,
+  },
+  heroBody: {
+    margin: 0,
+    color: '#2f4f5f',
+    fontSize: '1rem',
+    lineHeight: 1.6,
+  },
 }
 
-export default AppWrapper
+export default App

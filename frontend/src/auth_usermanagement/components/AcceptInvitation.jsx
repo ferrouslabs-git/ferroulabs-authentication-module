@@ -36,7 +36,7 @@ export function AcceptInvitation() {
 
   // Save invitation URL for post-login redirect
   useEffect(() => {
-    if (!user && invitation) {
+    if (!user && invitation && !invitation.is_accepted && !invitation.is_expired) {
       localStorage.setItem('trustos_post_login_redirect', window.location.pathname);
     }
   }, [user, invitation]);
