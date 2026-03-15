@@ -141,6 +141,11 @@ export async function exchangeAuthCodeForTokens(code) {
   return result;
 }
 
+/**
+ * @deprecated Use refreshAccessToken() from authApi.js instead.
+ * That function proxies the refresh through the backend, which reads
+ * the HttpOnly cookie — keeping the refresh token out of JS memory.
+ */
 export async function refreshTokens(refreshToken) {
   assertAuthConfig();
 

@@ -1,36 +1,44 @@
 import { createContext, useEffect, useMemo, useState, useRef } from "react";
-import { getCurrentUser, listMyTenants, revokeAllSessions, syncUser } from "../services/authApi";
+import { getCurrentUser, listMyTenants, registerSession, rotateSession, revokeAllSessions, storeRefreshCookie, refreshAccessToken, clearRefreshCookie, syncUser } from "../services/authApi";
 import {
   clearCodeFromUrl,
   exchangeAuthCodeForTokens,
   getAuthErrorFromUrl,
   getCodeFromUrl,
   logoutFromCognito,
-  refreshTokens,
   decodeJwt,
 } from "../services/cognitoClient";
 
 export const AuthContext = createContext(null);
 
-const ACCESS_TOKEN_KEY = "trustos_access_token";
-const ID_TOKEN_KEY = "trustos_id_token";
-const REFRESH_TOKEN_KEY = "trustos_refresh_token";
 const TENANT_KEY = "trustos_tenant_id";
+// Legacy keys — only used to defensively clear any stale values in localStorage
+const _LEGACY_ACCESS_TOKEN_KEY = "trustos_access_token";
+const _LEGACY_ID_TOKEN_KEY = "trustos_id_token";
+const _LEGACY_REFRESH_TOKEN_KEY = "trustos_refresh_token";
 const REFRESH_BEFORE_EXPIRY_MS = 5 * 60 * 1000; // 5 minutes
 const CHECK_INTERVAL_MS = 60 * 1000; // Check every minute
 
 export function AuthProvider({ children }) {
   const [token, setToken] = useState(
-    localStorage.getItem(ACCESS_TOKEN_KEY) || localStorage.getItem(ID_TOKEN_KEY),
+    null,
   );
-  const [idToken, setIdToken] = useState(localStorage.getItem(ID_TOKEN_KEY));
-  const [refreshToken, setRefreshToken] = useState(localStorage.getItem(REFRESH_TOKEN_KEY));
+  const [idToken, setIdToken] = useState(null);
   const [user, setUser] = useState(null);
   const [tenants, setTenants] = useState([]);
   const [tenantId, setTenantId] = useState(localStorage.getItem(TENANT_KEY));
   const [isLoading, setIsLoading] = useState(true);
   const [authError, setAuthError] = useState("");
+  const [sessionId, setSessionId] = useState(null);
   const refreshTimerRef = useRef(null);
+  const skipNextBootstrapRefreshRef = useRef(false);
+
+  // Clear any tokens that may have been left in localStorage by a previous version.
+  useEffect(() => {
+    localStorage.removeItem(_LEGACY_ACCESS_TOKEN_KEY);
+    localStorage.removeItem(_LEGACY_ID_TOKEN_KEY);
+    localStorage.removeItem(_LEGACY_REFRESH_TOKEN_KEY);
+  }, []);
 
   useEffect(() => {
     async function bootstrap() {
@@ -51,25 +59,58 @@ export function AuthProvider({ children }) {
               throw new Error("Cognito token response missing access_token");
             }
 
-            localStorage.setItem(ACCESS_TOKEN_KEY, tokens.access_token);
             setToken(tokens.access_token);
             if (tokens.id_token) {
-              localStorage.setItem(ID_TOKEN_KEY, tokens.id_token);
               setIdToken(tokens.id_token);
             }
+            // Hand off refresh token to HttpOnly cookie — removes it from JS-accessible memory.
             if (tokens.refresh_token) {
-              localStorage.setItem(REFRESH_TOKEN_KEY, tokens.refresh_token);
-              setRefreshToken(tokens.refresh_token);
+              try {
+                await storeRefreshCookie(tokens.access_token, tokens.refresh_token);
+              } catch (_cookieError) {
+                // Best-effort; auth flow continues even if cookie store fails.
+              }
+            }
+            try {
+              const sessionData = await registerSession(
+                tokens.access_token,
+                tokens.refresh_token,
+                { user_agent: navigator.userAgent },
+              );
+              setSessionId(sessionData.session_id);
+            } catch (_sessionError) {
+              // Session registration is best-effort; auth flow continues without it.
             }
             setAuthError("");
           } catch (error) {
             setAuthError(error?.message || "Unable to exchange auth code");
+            setIsLoading(false);
           }
           return;
         }
       }
 
       if (!token) {
+        // No in-memory token and no auth code — attempt silent refresh via HttpOnly cookie.
+        if (skipNextBootstrapRefreshRef.current) {
+          skipNextBootstrapRefreshRef.current = false;
+          setIsLoading(false);
+          return;
+        }
+        try {
+          const silentTokens = await refreshAccessToken();
+          if (silentTokens?.access_token) {
+            setToken(silentTokens.access_token);
+            if (silentTokens.id_token) {
+              setIdToken(silentTokens.id_token);
+            }
+            // Fall through to the user-load block below using the new token.
+            // Re-triggering bootstrap via setToken will re-run this effect.
+            return;
+          }
+        } catch (_silentError) {
+          // No valid cookie — user is not authenticated.
+        }
         setIsLoading(false);
         return;
       }
@@ -113,13 +154,9 @@ export function AuthProvider({ children }) {
         }
       } catch (error) {
         const authDetail = error?.response?.data?.detail;
-        localStorage.removeItem(ACCESS_TOKEN_KEY);
-        localStorage.removeItem(ID_TOKEN_KEY);
-        localStorage.removeItem(REFRESH_TOKEN_KEY);
         localStorage.removeItem(TENANT_KEY);
         setToken(null);
         setIdToken(null);
-        setRefreshToken(null);
         setTenantId(null);
         setUser(null);
         setTenants([]);
@@ -138,7 +175,7 @@ export function AuthProvider({ children }) {
 
   // Auto-refresh token before expiry
   useEffect(() => {
-    if (!token || !refreshToken) {
+    if (!token) {
       return;
     }
 
@@ -155,19 +192,30 @@ export function AuthProvider({ children }) {
       // If token expires in less than 5 minutes, refresh it
       if (timeUntilExpiry <= REFRESH_BEFORE_EXPIRY_MS && timeUntilExpiry > 0) {
         try {
-          const newTokens = await refreshTokens(refreshToken);
+          const newTokens = await refreshAccessToken();
           if (newTokens.access_token) {
-            localStorage.setItem(ACCESS_TOKEN_KEY, newTokens.access_token);
             setToken(newTokens.access_token);
             if (newTokens.id_token) {
-              localStorage.setItem(ID_TOKEN_KEY, newTokens.id_token);
               setIdToken(newTokens.id_token);
             }
-            
-            // Update refresh token if provided (Cognito may rotate it)
-            if (newTokens.refresh_token) {
-              localStorage.setItem(REFRESH_TOKEN_KEY, newTokens.refresh_token);
-              setRefreshToken(newTokens.refresh_token);
+
+            // Cognito rarely rotates the refresh token, but if it does,
+            // the backend /auth/token/refresh endpoint already rotated the cookie.
+            // We still rotate the server-side session record to match.
+            if (newTokens.refresh_token && sessionId) {
+              try {
+                // refreshTokens still needed here to get the old token for rotation proof
+                const rotated = await rotateSession(
+                  newTokens.access_token,
+                  sessionId,
+                  newTokens.refresh_token, // best we have; cookie handles true rotation
+                  newTokens.refresh_token,
+                  { user_agent: navigator.userAgent },
+                );
+                setSessionId(rotated.session_id);
+              } catch (_rotateError) {
+                // Rotation is best-effort; token is still updated locally.
+              }
             }
           }
         } catch (error) {
@@ -189,15 +237,10 @@ export function AuthProvider({ children }) {
         clearInterval(refreshTimerRef.current);
       }
     };
-  }, [token, refreshToken]);
+  }, [token]);
 
   const loginWithToken = async (nextToken, nextRefreshToken = null) => {
-    localStorage.setItem(ACCESS_TOKEN_KEY, nextToken);
     setToken(nextToken);
-    if (nextRefreshToken) {
-      localStorage.setItem(REFRESH_TOKEN_KEY, nextRefreshToken);
-      setRefreshToken(nextRefreshToken);
-    }
     setAuthError("");
   };
 
@@ -210,23 +253,33 @@ export function AuthProvider({ children }) {
     // Best-effort server-side revocation before local sign-out.
     if (token) {
       try {
-        await revokeAllSessions(token);
+        await revokeAllSessions(token, sessionId);
       } catch (_error) {
         // Continue local logout even if API revocation fails.
       }
     }
 
-    localStorage.removeItem(ACCESS_TOKEN_KEY);
-    localStorage.removeItem(ID_TOKEN_KEY);
-    localStorage.removeItem(REFRESH_TOKEN_KEY);
+    // Clear HttpOnly refresh cookie server-side.
+    try {
+      await clearRefreshCookie();
+    } catch (_error) {
+      // Continue local cleanup.
+    }
+
+    // Defensively clear any legacy localStorage keys.
+    // Prevent an immediate bootstrap refresh attempt after explicit logout.
+    skipNextBootstrapRefreshRef.current = true;
+    localStorage.removeItem(_LEGACY_ACCESS_TOKEN_KEY);
+    localStorage.removeItem(_LEGACY_ID_TOKEN_KEY);
+    localStorage.removeItem(_LEGACY_REFRESH_TOKEN_KEY);
     localStorage.removeItem(TENANT_KEY);
     localStorage.removeItem('trustos_post_login_redirect');
     setToken(null);
     setIdToken(null);
-    setRefreshToken(null);
     setTenantId(null);
     setUser(null);
     setTenants([]);
+    setSessionId(null);
     setAuthError("");
     // Redirect to Cognito logout after React finishes current render
     setTimeout(() => logoutFromCognito(), 0);
@@ -245,12 +298,13 @@ export function AuthProvider({ children }) {
       tenantId,
       authError,
       isLoading,
+      sessionId,
       isAuthenticated: Boolean(token && user),
       loginWithToken,
       logout,
       changeTenant,
     }),
-    [token, user, tenants, tenantId, authError, isLoading],
+    [token, user, tenants, tenantId, authError, isLoading, sessionId],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

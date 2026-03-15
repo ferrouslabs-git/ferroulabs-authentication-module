@@ -60,12 +60,57 @@ export async function inviteTenantUser(token, tenantId, email, role) {
   return res.data;
 }
 
+export async function registerSession(token, refreshToken, metadata = {}) {
+  const res = await api.post(
+    "/sessions/register",
+    { refresh_token: refreshToken, ...metadata },
+    { headers: authHeaders(token) },
+  );
+  return res.data; // { session_id, user_id, message }
+}
+
+export async function rotateSession(token, sessionId, oldRefreshToken, newRefreshToken, metadata = {}) {
+  const res = await api.post(
+    `/sessions/${sessionId}/rotate`,
+    { old_refresh_token: oldRefreshToken, new_refresh_token: newRefreshToken, ...metadata },
+    { headers: authHeaders(token) },
+  );
+  return res.data; // { session_id, user_id, message }
+}
+
 export async function revokeAllSessions(token, currentSessionId) {
   const headers = authHeaders(token);
   if (currentSessionId) {
     headers["X-Current-Session-ID"] = currentSessionId;
   }
   const res = await api.delete("/sessions/all", { headers });
+  return res.data;
+}
+
+export async function storeRefreshCookie(token, refreshToken) {
+  const res = await api.post(
+    "/cookie/store-refresh",
+    { refresh_token: refreshToken },
+    { headers: authHeaders(token) },
+  );
+  return res.data;
+}
+
+/**
+ * Exchange the HttpOnly refresh cookie for new tokens via the backend proxy.
+ * No body needed — the browser sends the HttpOnly cookie automatically.
+ */
+export async function refreshAccessToken() {
+  const res = await api.post(
+    "/token/refresh",
+    null,
+    { headers: { "X-Requested-With": "XMLHttpRequest" } },
+  );
+  return res.data; // { access_token, id_token, expires_in }
+}
+
+export async function clearRefreshCookie() {
+  const res = await api.post("/cookie/clear-refresh");
   return res.data;
 }
 
