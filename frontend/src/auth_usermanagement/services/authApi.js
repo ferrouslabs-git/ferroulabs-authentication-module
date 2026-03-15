@@ -1,7 +1,8 @@
 import axios from "axios";
+import { AUTH_CONFIG } from "../config";
 
 const api = axios.create({
-  baseURL: "/auth",
+  baseURL: AUTH_CONFIG.apiBasePath,
   timeout: 15000,
 });
 

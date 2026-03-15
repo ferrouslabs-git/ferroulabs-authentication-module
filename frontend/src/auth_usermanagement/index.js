@@ -11,6 +11,8 @@ export { TenantSwitcher } from "./components/TenantSwitcher";
 export { RoleSelector } from "./components/RoleSelector";
 export { InviteUserModal } from "./components/InviteUserModal";
 export { UserList } from "./components/UserList";
+export { AcceptInvitation } from "./components/AcceptInvitation";
 
 export * as authApi from "./services/authApi";
 export * as cognitoClient from "./services/cognitoClient";
+export * from "./config";

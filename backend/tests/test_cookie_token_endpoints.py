@@ -2,6 +2,7 @@
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -17,6 +18,8 @@ class _FakeSettings:
     cognito_domain = "https://auth.example.com"
     cognito_client_id = "test-client-id"
     cookie_secure = True
+    resolved_auth_cookie_name = "authum_refresh_token"
+    resolved_auth_cookie_path = "/auth/token"
 
 
 def _make_db():
@@ -42,6 +45,25 @@ def _seed_user(SessionLocal):
     sub = user.cognito_sub
     session.close()
     return sub
+
+
+@pytest.fixture(autouse=True)
+def _override_db_dependency():
+    engine, SessionLocal = _make_db()
+
+    def _override_get_db():
+        db = SessionLocal()
+        try:
+            yield db
+        finally:
+            db.close()
+
+    app.dependency_overrides[get_db] = _override_get_db
+    try:
+        yield
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+        Base.metadata.drop_all(engine)
 
 
 # ---------------------------------------------------------------------------
@@ -85,7 +107,7 @@ def test_store_refresh_sets_httponly_cookie(monkeypatch):
         assert resp.json()["message"] == "Refresh token stored"
 
         set_cookie = resp.headers.get("set-cookie", "")
-        assert "trustos_refresh_token" in set_cookie
+        assert _FakeSettings.resolved_auth_cookie_name in set_cookie
         assert "HttpOnly" in set_cookie
         assert "SameSite=strict" in set_cookie.lower() or "samesite=strict" in set_cookie.lower()
     finally:
@@ -127,7 +149,7 @@ def test_token_refresh_returns_access_token(monkeypatch):
             resp = client.post(
                 "/auth/token/refresh",
                 headers={"X-Requested-With": "XMLHttpRequest"},
-                cookies={"trustos_refresh_token": "opaque-cookie-key"},
+                cookies={_FakeSettings.resolved_auth_cookie_name: "opaque-cookie-key"},
             )
 
     assert resp.status_code == 200
@@ -149,7 +171,7 @@ def test_token_refresh_rejects_missing_csrf_header():
     with TestClient(app) as client:
         resp = client.post(
             "/auth/token/refresh",
-            cookies={"trustos_refresh_token": "valid-refresh-token"},
+            cookies={_FakeSettings.resolved_auth_cookie_name: "valid-refresh-token"},
         )
     assert resp.status_code == 403
 
@@ -166,7 +188,7 @@ def test_token_refresh_rejects_cognito_error(monkeypatch):
             resp = client.post(
                 "/auth/token/refresh",
                 headers={"X-Requested-With": "XMLHttpRequest"},
-                cookies={"trustos_refresh_token": "opaque-cookie-key"},
+                cookies={_FakeSettings.resolved_auth_cookie_name: "opaque-cookie-key"},
             )
     assert resp.status_code == 401
     assert "Refresh token expired" in resp.json()["detail"]
@@ -193,12 +215,12 @@ def test_token_refresh_rotates_cookie_when_cognito_returns_new_refresh_token():
             resp = client.post(
                 "/auth/token/refresh",
                 headers={"X-Requested-With": "XMLHttpRequest"},
-                cookies={"trustos_refresh_token": "old-opaque-key"},
+                cookies={_FakeSettings.resolved_auth_cookie_name: "old-opaque-key"},
             )
 
     assert resp.status_code == 200
     set_cookie = resp.headers.get("set-cookie", "")
-    assert "trustos_refresh_token" in set_cookie
+    assert _FakeSettings.resolved_auth_cookie_name in set_cookie
     assert "new-opaque-key" in set_cookie
 
 
@@ -213,7 +235,7 @@ def test_clear_refresh_cookie_removes_cookie():
     assert resp.status_code == 200
     assert resp.json()["message"] == "Refresh cookie cleared"
     set_cookie = resp.headers.get("set-cookie", "")
-    assert "trustos_refresh_token" in set_cookie
+    assert _FakeSettings.resolved_auth_cookie_name in set_cookie
     assert "Max-Age=0" in set_cookie
 
 
@@ -261,7 +283,7 @@ def test_token_refresh_is_rate_limited():
 
         with TestClient(test_app) as client:
             headers = {"X-Requested-With": "XMLHttpRequest"}
-            cookies = {"trustos_refresh_token": "some-token"}
+            cookies = {_FakeSettings.resolved_auth_cookie_name: "some-token"}
 
             resp1 = client.post("/auth/token/refresh", headers=headers, cookies=cookies)
             assert resp1.status_code == 200

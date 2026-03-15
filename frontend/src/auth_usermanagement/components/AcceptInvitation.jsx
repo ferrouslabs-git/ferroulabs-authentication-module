@@ -3,10 +3,11 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import { getInvitationDetails, acceptInvitation } from '../services/authApi';
 import { LoginForm } from './LoginForm';
+import { LEGACY_STORAGE_KEYS, STORAGE_KEYS, isBrowser } from '../config';
 
 export function AcceptInvitation() {
   const { token } = useParams();
-  const { user, token: authToken } = useAuth();
+  const { user, token: authToken, refreshAuthState } = useAuth();
   const navigate = useNavigate();
   
   const [invitation, setInvitation] = useState(null);
@@ -36,8 +37,12 @@ export function AcceptInvitation() {
 
   // Save invitation URL for post-login redirect
   useEffect(() => {
+    if (!isBrowser) {
+      return;
+    }
     if (!user && invitation && !invitation.is_accepted && !invitation.is_expired) {
-      localStorage.setItem('trustos_post_login_redirect', window.location.pathname);
+      window.localStorage.setItem(STORAGE_KEYS.postLoginRedirect, window.location.pathname);
+      window.localStorage.removeItem(LEGACY_STORAGE_KEYS.postLoginRedirect);
     }
   }, [user, invitation]);
 
@@ -46,9 +51,9 @@ export function AcceptInvitation() {
       setAccepting(true);
       setError(null);
       await acceptInvitation(authToken, token);
+      await refreshAuthState();
       // Redirect to dashboard after successful acceptance
       navigate('/', { replace: true });
-      window.location.reload(); // Reload to refresh tenant list
     } catch (err) {
       setError(err.response?.data?.detail || 'Failed to accept invitation');
       setAccepting(false);

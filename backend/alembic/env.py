@@ -20,6 +20,7 @@ from app.auth_usermanagement.models import (
     Membership,
     Invitation,
     Session,
+    RefreshTokenStore,
 )
 
 # this is the Alembic Config object, which provides

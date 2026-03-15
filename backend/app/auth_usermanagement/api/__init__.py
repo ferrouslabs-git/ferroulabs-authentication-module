@@ -79,7 +79,6 @@ from ..services.cookie_token_service import (
     set_refresh_cookie,
     clear_refresh_cookie,
     call_cognito_refresh,
-    COOKIE_NAME,
     store_refresh_token,
     get_refresh_token,
     rotate_refresh_token,
@@ -1038,6 +1037,7 @@ async def store_refresh_cookie(
     payload: _StoreRefreshPayload,
     response: Response,
     current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
 ):
     """Store Cognito refresh token in an HttpOnly cookie after login.
 
@@ -1046,8 +1046,14 @@ async def store_refresh_cookie(
     cookie scoped to the /auth/token path.
     """
     settings = get_settings()
-    cookie_key = store_refresh_token(payload.refresh_token)
-    set_refresh_cookie(response, cookie_key, secure=settings.cookie_secure)
+    cookie_key = store_refresh_token(db, payload.refresh_token)
+    set_refresh_cookie(
+        response,
+        cookie_key,
+        secure=settings.cookie_secure,
+        cookie_name=settings.resolved_auth_cookie_name,
+        cookie_path=settings.resolved_auth_cookie_path,
+    )
     log_audit_event("refresh_cookie_stored", actor_user_id=str(current_user.id))
     return {"message": "Refresh token stored"}
 
@@ -1057,6 +1063,7 @@ async def token_refresh(
     request: Request,
     response: Response,
     x_requested_with: Optional[str] = Header(None),
+    db: Session = Depends(get_db),
 ):
     """Exchange the HttpOnly refresh cookie for a new access token.
 
@@ -1072,21 +1079,21 @@ async def token_refresh(
             detail="X-Requested-With: XMLHttpRequest header required",
         )
 
-    cookie_key = request.cookies.get(COOKIE_NAME)
+    settings = get_settings()
+    cookie_key = request.cookies.get(settings.resolved_auth_cookie_name)
     if not cookie_key:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="No refresh token cookie present",
         )
 
-    refresh_token = get_refresh_token(cookie_key)
+    refresh_token = get_refresh_token(db, cookie_key)
     if not refresh_token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="No refresh token cookie present",
         )
 
-    settings = get_settings()
     if not settings.cognito_domain or not settings.cognito_client_id:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -1107,8 +1114,14 @@ async def token_refresh(
 
     # Rotate cookie if Cognito issues a new refresh token
     if tokens.get("refresh_token"):
-        new_cookie_key = rotate_refresh_token(cookie_key, tokens["refresh_token"])
-        set_refresh_cookie(response, new_cookie_key, secure=settings.cookie_secure)
+        new_cookie_key = rotate_refresh_token(db, cookie_key, tokens["refresh_token"])
+        set_refresh_cookie(
+            response,
+            new_cookie_key,
+            secure=settings.cookie_secure,
+            cookie_name=settings.resolved_auth_cookie_name,
+            cookie_path=settings.resolved_auth_cookie_path,
+        )
 
     return {
         "access_token": tokens.get("access_token"),
@@ -1121,6 +1134,7 @@ async def token_refresh(
 async def clear_refresh(
     request: Request,
     response: Response,
+    db: Session = Depends(get_db),
 ):
     """Expire the HttpOnly refresh-token cookie.
 
@@ -1128,6 +1142,11 @@ async def clear_refresh(
     be gone when this is called.
     """
     settings = get_settings()
-    revoke_refresh_token(request.cookies.get(COOKIE_NAME, ""))
-    clear_refresh_cookie(response, secure=settings.cookie_secure)
+    revoke_refresh_token(db, request.cookies.get(settings.resolved_auth_cookie_name, ""))
+    clear_refresh_cookie(
+        response,
+        secure=settings.cookie_secure,
+        cookie_name=settings.resolved_auth_cookie_name,
+        cookie_path=settings.resolved_auth_cookie_path,
+    )
     return {"message": "Refresh cookie cleared"}

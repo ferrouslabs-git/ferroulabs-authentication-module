@@ -9,6 +9,7 @@ from .user import User
 from .membership import Membership
 from .invitation import Invitation
 from .session import Session
+from .refresh_token import RefreshTokenStore
 
 __all__ = [
     "Tenant",
@@ -16,4 +17,5 @@ __all__ = [
     "Membership",
     "Invitation",
     "Session",
+    "RefreshTokenStore",
 ]

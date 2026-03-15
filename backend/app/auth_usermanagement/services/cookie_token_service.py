@@ -13,90 +13,105 @@ Security properties of the cookie:
 import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta, UTC
-from threading import Lock
 import secrets
 
 from fastapi import Response
+from sqlalchemy.orm import Session
 
-COOKIE_NAME = "trustos_refresh_token"
+from ..models.refresh_token import RefreshTokenStore
+
+DEFAULT_COOKIE_NAME = "authum_refresh_token"
+DEFAULT_COOKIE_PATH = "/auth/token"
 COOKIE_MAX_AGE = 30 * 24 * 60 * 60  # 30 days in seconds
-
-
-_refresh_store_lock = Lock()
-_refresh_store: dict[str, tuple[str, datetime]] = {}
 
 
 def _utc_now() -> datetime:
     return datetime.now(UTC)
 
 
-def _purge_expired_tokens() -> None:
+def _purge_expired_tokens(db: Session) -> None:
     now = _utc_now()
-    expired_keys = [key for key, (_token, expires_at) in _refresh_store.items() if expires_at <= now]
-    for key in expired_keys:
-        _refresh_store.pop(key, None)
+    db.query(RefreshTokenStore).filter(RefreshTokenStore.expires_at <= now).delete(synchronize_session=False)
 
 
-def store_refresh_token(refresh_token: str) -> str:
+def store_refresh_token(db: Session, refresh_token: str) -> str:
     """Store refresh token server-side and return a short opaque cookie key."""
     key = secrets.token_urlsafe(32)
     expires_at = _utc_now() + timedelta(seconds=COOKIE_MAX_AGE)
-    with _refresh_store_lock:
-        _purge_expired_tokens()
-        _refresh_store[key] = (refresh_token, expires_at)
+    _purge_expired_tokens(db)
+    db.add(
+        RefreshTokenStore(
+            cookie_key=key,
+            refresh_token=refresh_token,
+            expires_at=expires_at,
+        )
+    )
+    db.commit()
     return key
 
 
-def get_refresh_token(cookie_key: str) -> str | None:
+def get_refresh_token(db: Session, cookie_key: str) -> str | None:
     """Resolve an opaque cookie key to a live refresh token."""
     if not cookie_key:
         return None
-    with _refresh_store_lock:
-        _purge_expired_tokens()
-        row = _refresh_store.get(cookie_key)
-        if not row:
-            return None
-        return row[0]
+    _purge_expired_tokens(db)
+    row = db.query(RefreshTokenStore).filter(RefreshTokenStore.cookie_key == cookie_key).first()
+    if not row:
+        return None
+    return row.refresh_token
 
 
-def rotate_refresh_token(cookie_key: str, new_refresh_token: str) -> str:
+def rotate_refresh_token(db: Session, cookie_key: str, new_refresh_token: str) -> str:
     """Rotate stored refresh token and return a new cookie key."""
-    new_key = store_refresh_token(new_refresh_token)
-    with _refresh_store_lock:
-        _refresh_store.pop(cookie_key, None)
+    new_key = store_refresh_token(db, new_refresh_token)
+    db.query(RefreshTokenStore).filter(RefreshTokenStore.cookie_key == cookie_key).delete(synchronize_session=False)
+    db.commit()
     return new_key
 
 
-def revoke_refresh_token(cookie_key: str) -> None:
+def revoke_refresh_token(db: Session, cookie_key: str) -> None:
     """Revoke an opaque cookie key from the server-side refresh store."""
     if not cookie_key:
         return
-    with _refresh_store_lock:
-        _refresh_store.pop(cookie_key, None)
+    db.query(RefreshTokenStore).filter(RefreshTokenStore.cookie_key == cookie_key).delete(synchronize_session=False)
+    db.commit()
 
 
-def set_refresh_cookie(response: Response, cookie_key: str, secure: bool = True) -> None:
+def set_refresh_cookie(
+    response: Response,
+    cookie_key: str,
+    *,
+    secure: bool = True,
+    cookie_name: str = DEFAULT_COOKIE_NAME,
+    cookie_path: str = DEFAULT_COOKIE_PATH,
+) -> None:
     """Attach an HttpOnly opaque refresh-key cookie to a FastAPI response."""
     response.set_cookie(
-        key=COOKIE_NAME,
+        key=cookie_name,
         value=cookie_key,
         httponly=True,
         secure=secure,
         samesite="strict",
-        path="/auth/token",
+        path=cookie_path,
         max_age=COOKIE_MAX_AGE,
     )
 
 
-def clear_refresh_cookie(response: Response, secure: bool = True) -> None:
+def clear_refresh_cookie(
+    response: Response,
+    *,
+    secure: bool = True,
+    cookie_name: str = DEFAULT_COOKIE_NAME,
+    cookie_path: str = DEFAULT_COOKIE_PATH,
+) -> None:
     """Expire the refresh-token cookie by setting max_age=0."""
     response.set_cookie(
-        key=COOKIE_NAME,
+        key=cookie_name,
         value="",
         httponly=True,
         secure=secure,
         samesite="strict",
-        path="/auth/token",
+        path=cookie_path,
         max_age=0,
     )
 

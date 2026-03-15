@@ -27,6 +27,24 @@ class Settings(BaseSettings):
     frontend_url: str = os.getenv("FRONTEND_URL", "http://localhost:5173")
     cookie_secure: bool = os.getenv("COOKIE_SECURE", "true").lower() == "true"
 
+    # Portability
+    auth_namespace: str = os.getenv("AUTH_NAMESPACE", "authum")
+    auth_api_prefix: str = os.getenv("AUTH_API_PREFIX", "/auth")
+    auth_cookie_name: str = os.getenv("AUTH_COOKIE_NAME", "")
+    auth_cookie_path: str = os.getenv("AUTH_COOKIE_PATH", "")
+
+    @property
+    def resolved_auth_cookie_name(self) -> str:
+        if self.auth_cookie_name:
+            return self.auth_cookie_name
+        return f"{self.auth_namespace}_refresh_token"
+
+    @property
+    def resolved_auth_cookie_path(self) -> str:
+        if self.auth_cookie_path:
+            return self.auth_cookie_path
+        return f"{self.auth_api_prefix.rstrip('/')}/token"
+
     class Config:
         env_file = ".env"
         extra = "ignore"

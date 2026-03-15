@@ -8,6 +8,8 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
+from ..config import get_settings
+
 
 class RateLimitMiddleware(BaseHTTPMiddleware):
     """
@@ -16,20 +18,32 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
     Note: in-memory limiter is acceptable for local/dev and single-process deploys.
     """
 
-    def __init__(self, app, limit: int = 30, window_seconds: int = 60):
+    def __init__(self, app, limit: int = 30, window_seconds: int = 60, auth_prefix: str | None = None):
         super().__init__(app)
         self.limit = limit
         self.window = timedelta(seconds=window_seconds)
         self.hits = defaultdict(deque)
+        settings = get_settings()
+        configured_prefix = auth_prefix or settings.auth_api_prefix
+        self.auth_prefix = self._normalize_prefix(configured_prefix)
 
         self.protected_routes = {
-            "/auth/debug-token",
-            "/auth/sync",
-            "/auth/invite",
-            "/auth/invites/accept",
-            "/auth/token/refresh",
-            "/auth/cookie/store-refresh",
+            f"{self.auth_prefix}/debug-token",
+            f"{self.auth_prefix}/sync",
+            f"{self.auth_prefix}/invite",
+            f"{self.auth_prefix}/invites/accept",
+            f"{self.auth_prefix}/token/refresh",
+            f"{self.auth_prefix}/cookie/store-refresh",
         }
+
+    @staticmethod
+    def _normalize_prefix(prefix: str) -> str:
+        cleaned = (prefix or "/auth").strip()
+        if not cleaned:
+            return "/auth"
+        if not cleaned.startswith("/"):
+            cleaned = f"/{cleaned}"
+        return cleaned.rstrip("/") or "/auth"
 
     async def dispatch(self, request: Request, call_next):
         path = request.url.path
@@ -66,4 +80,4 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             return True
 
         # Protect plan-compatible invite route: /auth/tenants/{tenant_id}/invite
-        return path.startswith("/auth/tenants/") and path.endswith("/invite")
+        return path.startswith(f"{self.auth_prefix}/tenants/") and path.endswith("/invite")

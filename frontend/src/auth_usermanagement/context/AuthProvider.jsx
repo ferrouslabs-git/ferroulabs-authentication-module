@@ -8,16 +8,35 @@ import {
   logoutFromCognito,
   decodeJwt,
 } from "../services/cognitoClient";
+import { LEGACY_STORAGE_KEYS, STORAGE_KEYS, isBrowser, isSafeInvitePath } from "../config";
 
 export const AuthContext = createContext(null);
 
-const TENANT_KEY = "trustos_tenant_id";
-// Legacy keys — only used to defensively clear any stale values in localStorage
-const _LEGACY_ACCESS_TOKEN_KEY = "trustos_access_token";
-const _LEGACY_ID_TOKEN_KEY = "trustos_id_token";
-const _LEGACY_REFRESH_TOKEN_KEY = "trustos_refresh_token";
+const TENANT_KEY = STORAGE_KEYS.tenantId;
+const POST_LOGIN_REDIRECT_KEY = STORAGE_KEYS.postLoginRedirect;
 const REFRESH_BEFORE_EXPIRY_MS = 5 * 60 * 1000; // 5 minutes
 const CHECK_INTERVAL_MS = 60 * 1000; // Check every minute
+
+function readStorage(key) {
+  if (!isBrowser) {
+    return null;
+  }
+  return window.localStorage.getItem(key);
+}
+
+function writeStorage(key, value) {
+  if (!isBrowser) {
+    return;
+  }
+  window.localStorage.setItem(key, value);
+}
+
+function removeStorage(key) {
+  if (!isBrowser) {
+    return;
+  }
+  window.localStorage.removeItem(key);
+}
 
 export function AuthProvider({ children }) {
   const [token, setToken] = useState(
@@ -26,18 +45,25 @@ export function AuthProvider({ children }) {
   const [idToken, setIdToken] = useState(null);
   const [user, setUser] = useState(null);
   const [tenants, setTenants] = useState([]);
-  const [tenantId, setTenantId] = useState(localStorage.getItem(TENANT_KEY));
+  const [tenantId, setTenantId] = useState(
+    readStorage(TENANT_KEY) || readStorage(LEGACY_STORAGE_KEYS.tenantId),
+  );
   const [isLoading, setIsLoading] = useState(true);
   const [authError, setAuthError] = useState("");
   const [sessionId, setSessionId] = useState(null);
   const refreshTimerRef = useRef(null);
   const skipNextBootstrapRefreshRef = useRef(false);
 
-  // Clear any tokens that may have been left in localStorage by a previous version.
+  // Migrate legacy key names once and clear stale legacy token keys.
   useEffect(() => {
-    localStorage.removeItem(_LEGACY_ACCESS_TOKEN_KEY);
-    localStorage.removeItem(_LEGACY_ID_TOKEN_KEY);
-    localStorage.removeItem(_LEGACY_REFRESH_TOKEN_KEY);
+    const legacyTenant = readStorage(LEGACY_STORAGE_KEYS.tenantId);
+    if (!readStorage(TENANT_KEY) && legacyTenant) {
+      writeStorage(TENANT_KEY, legacyTenant);
+    }
+    removeStorage(LEGACY_STORAGE_KEYS.tenantId);
+    removeStorage(LEGACY_STORAGE_KEYS.accessToken);
+    removeStorage(LEGACY_STORAGE_KEYS.idToken);
+    removeStorage(LEGACY_STORAGE_KEYS.refreshToken);
   }, []);
 
   useEffect(() => {
@@ -137,24 +163,26 @@ export function AuthProvider({ children }) {
         if (!tenantId && myTenants.length > 0) {
           const firstTenant = myTenants[0].id;
           setTenantId(firstTenant);
-          localStorage.setItem(TENANT_KEY, firstTenant);
+          writeStorage(TENANT_KEY, firstTenant);
         }
         setAuthError("");
 
         // Redirect only to safe invitation paths and clear stale values.
-        const redirectPath = localStorage.getItem('trustos_post_login_redirect');
-        const isSafeInvitePath = typeof redirectPath === 'string' && /^\/invite\/[A-Za-z0-9_-]+$/.test(redirectPath);
-        if (isSafeInvitePath && redirectPath !== window.location.pathname) {
-          localStorage.removeItem('trustos_post_login_redirect');
+        const redirectPath = readStorage(POST_LOGIN_REDIRECT_KEY) || readStorage(LEGACY_STORAGE_KEYS.postLoginRedirect);
+        const isSafeInviteRedirect = isSafeInvitePath(redirectPath);
+        if (isSafeInviteRedirect && redirectPath !== window.location.pathname) {
+          removeStorage(POST_LOGIN_REDIRECT_KEY);
+          removeStorage(LEGACY_STORAGE_KEYS.postLoginRedirect);
           window.location.href = redirectPath;
           return;
         }
-        if (redirectPath && !isSafeInvitePath) {
-          localStorage.removeItem('trustos_post_login_redirect');
+        if (redirectPath && !isSafeInviteRedirect) {
+          removeStorage(POST_LOGIN_REDIRECT_KEY);
+          removeStorage(LEGACY_STORAGE_KEYS.postLoginRedirect);
         }
       } catch (error) {
         const authDetail = error?.response?.data?.detail;
-        localStorage.removeItem(TENANT_KEY);
+        removeStorage(TENANT_KEY);
         setToken(null);
         setIdToken(null);
         setTenantId(null);
@@ -269,11 +297,12 @@ export function AuthProvider({ children }) {
     // Defensively clear any legacy localStorage keys.
     // Prevent an immediate bootstrap refresh attempt after explicit logout.
     skipNextBootstrapRefreshRef.current = true;
-    localStorage.removeItem(_LEGACY_ACCESS_TOKEN_KEY);
-    localStorage.removeItem(_LEGACY_ID_TOKEN_KEY);
-    localStorage.removeItem(_LEGACY_REFRESH_TOKEN_KEY);
-    localStorage.removeItem(TENANT_KEY);
-    localStorage.removeItem('trustos_post_login_redirect');
+    removeStorage(LEGACY_STORAGE_KEYS.accessToken);
+    removeStorage(LEGACY_STORAGE_KEYS.idToken);
+    removeStorage(LEGACY_STORAGE_KEYS.refreshToken);
+    removeStorage(TENANT_KEY);
+    removeStorage(POST_LOGIN_REDIRECT_KEY);
+    removeStorage(LEGACY_STORAGE_KEYS.postLoginRedirect);
     setToken(null);
     setIdToken(null);
     setTenantId(null);
@@ -287,7 +316,37 @@ export function AuthProvider({ children }) {
 
   const changeTenant = (nextTenantId) => {
     setTenantId(nextTenantId);
-    localStorage.setItem(TENANT_KEY, nextTenantId);
+    writeStorage(TENANT_KEY, nextTenantId);
+  };
+
+  const refreshAuthState = async () => {
+    if (!token) {
+      return;
+    }
+
+    setIsLoading(true);
+    try {
+      await syncUser(idToken || token);
+      const me = await getCurrentUser(token);
+      const myTenants = await listMyTenants(token);
+      setUser(me);
+      setTenants(Array.isArray(myTenants) ? myTenants : []);
+      if (!tenantId && myTenants.length > 0) {
+        const firstTenant = myTenants[0].id;
+        setTenantId(firstTenant);
+        writeStorage(TENANT_KEY, firstTenant);
+      }
+      setAuthError("");
+    } catch (error) {
+      const authDetail = error?.response?.data?.detail;
+      setAuthError(
+        authDetail
+          ? `Could not refresh auth state: ${authDetail}`
+          : "Could not refresh auth state.",
+      );
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const value = useMemo(
@@ -303,6 +362,7 @@ export function AuthProvider({ children }) {
       loginWithToken,
       logout,
       changeTenant,
+      refreshAuthState,
     }),
     [token, user, tenants, tenantId, authError, isLoading, sessionId],
   );

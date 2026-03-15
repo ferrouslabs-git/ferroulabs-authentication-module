@@ -69,6 +69,26 @@ def test_protected_route_requires_tenant_header():
     assert "X-Tenant-ID header required" in body
 
 
+def test_custom_auth_prefix_skips_non_matching_paths():
+    middleware = TenantContextMiddleware(_noop_asgi_app, auth_prefix="/iam")
+    request = _build_request("/auth/tenants/123/users", headers=[(b"authorization", b"Bearer token")])
+
+    assert middleware._should_skip_middleware(request) is True
+
+
+def test_custom_auth_prefix_protects_matching_paths():
+    middleware = TenantContextMiddleware(_noop_asgi_app, auth_prefix="/iam")
+    request = _build_request("/iam/tenants/123/users", headers=[(b"authorization", b"Bearer token")])
+
+    async def call_next(_request):
+        raise AssertionError("call_next should not run when tenant header is missing")
+
+    response = asyncio.run(middleware.dispatch(request, call_next))
+
+    assert response.status_code == 400
+    assert "X-Tenant-ID header required" in response.body.decode("utf-8")
+
+
 def test_cross_tenant_access_blocked_at_api_level(monkeypatch):
     engine = create_engine(
         "sqlite://",

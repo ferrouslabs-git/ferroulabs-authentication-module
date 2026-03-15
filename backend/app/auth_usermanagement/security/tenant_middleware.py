@@ -13,6 +13,8 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 from uuid import UUID
 
+from ..config import get_settings
+
 class TenantContextMiddleware(BaseHTTPMiddleware):
     """
     Middleware to enforce tenant request prechecks.
@@ -36,15 +38,28 @@ class TenantContextMiddleware(BaseHTTPMiddleware):
     - Stores request.state.requested_tenant_id for downstream use
     """
     
-    # Routes that don't require tenant context
-    SKIP_ROUTES = {
-        "/health",
-        "/auth/sync",
-        "/auth/debug-token",
-        "/auth/me",
-        "/auth/tenants",
-        "/auth/tenants/my",
-    }
+    def __init__(self, app, auth_prefix: str | None = None):
+        super().__init__(app)
+        settings = get_settings()
+        configured_prefix = auth_prefix or settings.auth_api_prefix
+        self.auth_prefix = self._normalize_prefix(configured_prefix)
+        self.skip_routes = {
+            "/health",
+            f"{self.auth_prefix}/sync",
+            f"{self.auth_prefix}/debug-token",
+            f"{self.auth_prefix}/me",
+            f"{self.auth_prefix}/tenants",
+            f"{self.auth_prefix}/tenants/my",
+        }
+
+    @staticmethod
+    def _normalize_prefix(prefix: str) -> str:
+        cleaned = (prefix or "/auth").strip()
+        if not cleaned:
+            return "/auth"
+        if not cleaned.startswith("/"):
+            cleaned = f"/{cleaned}"
+        return cleaned.rstrip("/") or "/auth"
     
     async def dispatch(self, request: Request, call_next):
         """Process request and validate tenant access."""
@@ -102,31 +117,31 @@ class TenantContextMiddleware(BaseHTTPMiddleware):
         path = request.url.path
 
         # Apply tenant validation only to auth routes.
-        if not path.startswith("/auth"):
+        if not path.startswith(self.auth_prefix):
             return True
         
         # Exact match
-        if path in self.SKIP_ROUTES:
+        if path in self.skip_routes:
             return True
         
         # Allow POST /auth/tenants (tenant creation)
-        if path == "/auth/tenants" and request.method == "POST":
+        if path == f"{self.auth_prefix}/tenants" and request.method == "POST":
             return True
         
         # Allow GET /auth/tenants/my (list user's tenants)
-        if path == "/auth/tenants/my" and request.method == "GET":
+        if path == f"{self.auth_prefix}/tenants/my" and request.method == "GET":
             return True
 
         # Allow invitation token routes (do not require tenant header)
-        if path.startswith("/auth/invites/"):
+        if path.startswith(f"{self.auth_prefix}/invites/"):
             return True
 
         # Session revocation routes are user-scoped, not tenant-scoped.
-        if path.startswith("/auth/sessions"):
+        if path.startswith(f"{self.auth_prefix}/sessions"):
             return True
 
         # Cookie management and token refresh are user-scoped, not tenant-scoped.
-        if path.startswith("/auth/cookie/") or path == "/auth/token/refresh":
+        if path.startswith(f"{self.auth_prefix}/cookie/") or path == f"{self.auth_prefix}/token/refresh":
             return True
         
         return False

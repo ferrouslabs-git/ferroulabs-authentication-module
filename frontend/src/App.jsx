@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Navigate, Route, Routes, useNavigate } from 'react-router-dom'
-import { useAuth } from './auth_usermanagement'
+import { AcceptInvitation, AUTH_CONFIG, useAuth } from './auth_usermanagement'
 import { openHostedLogin, openHostedSignup } from './auth_usermanagement/services/cognitoClient'
 
 function Shell({ children }) {
@@ -133,6 +133,7 @@ function CallbackPage() {
 
 function App() {
   const { isAuthenticated } = useAuth()
+  const inviteRoutePath = `${AUTH_CONFIG.invitePathPrefix}:token`
 
   return (
     <Routes>
@@ -144,7 +145,8 @@ function App() {
         path="/dashboard"
         element={<Shell>{isAuthenticated ? <DashboardPage /> : <Navigate to="/" replace />}</Shell>}
       />
-      <Route path="/callback" element={<Shell><CallbackPage /></Shell>} />
+      <Route path={AUTH_CONFIG.callbackPath} element={<Shell><CallbackPage /></Shell>} />
+      <Route path={inviteRoutePath} element={<Shell><AcceptInvitation /></Shell>} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   )

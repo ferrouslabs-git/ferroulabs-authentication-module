@@ -10,7 +10,8 @@ from fastapi import Response
 
 from app.auth_usermanagement.services.cookie_token_service import (
     COOKIE_MAX_AGE,
-    COOKIE_NAME,
+    DEFAULT_COOKIE_NAME,
+    DEFAULT_COOKIE_PATH,
     call_cognito_refresh,
     clear_refresh_cookie,
     set_refresh_cookie,
@@ -26,11 +27,11 @@ def test_set_refresh_cookie_attributes():
     set_refresh_cookie(response, "my-refresh-token")
 
     raw = response.headers.get("set-cookie", "")
-    assert COOKIE_NAME in raw
+    assert DEFAULT_COOKIE_NAME in raw
     assert "my-refresh-token" in raw
     assert "HttpOnly" in raw
     assert "SameSite=strict" in raw.lower() or "samesite=strict" in raw.lower()
-    assert "Path=/auth/token" in raw
+    assert f"Path={DEFAULT_COOKIE_PATH}" in raw
     assert f"Max-Age={COOKIE_MAX_AGE}" in raw
 
 
@@ -43,7 +44,7 @@ def test_clear_refresh_cookie_zeroes_max_age():
     clear_refresh_cookie(response)
 
     raw = response.headers.get("set-cookie", "")
-    assert COOKIE_NAME in raw
+    assert DEFAULT_COOKIE_NAME in raw
     assert "Max-Age=0" in raw
 
 

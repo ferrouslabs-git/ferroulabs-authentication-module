@@ -1,9 +1,17 @@
+import { AUTH_CONFIG, LEGACY_STORAGE_KEYS, STORAGE_KEYS, isBrowser } from "../config";
+
 const cognitoDomain = import.meta.env.VITE_COGNITO_DOMAIN;
 const clientId = import.meta.env.VITE_COGNITO_CLIENT_ID;
-const redirectUri =
-  import.meta.env.VITE_COGNITO_REDIRECT_URI || `${window.location.origin}/callback`;
 
-const CODE_VERIFIER_KEY = "trustos_pkce_code_verifier";
+function getRedirectUri() {
+  if (import.meta.env.VITE_COGNITO_REDIRECT_URI) {
+    return import.meta.env.VITE_COGNITO_REDIRECT_URI;
+  }
+  if (!isBrowser) {
+    return AUTH_CONFIG.callbackPath;
+  }
+  return `${window.location.origin}${AUTH_CONFIG.callbackPath}`;
+}
 
 function toBase64Url(bytes) {
   const binary = String.fromCharCode(...bytes);
@@ -41,8 +49,9 @@ export async function getHostedLoginUrl() {
 
   const codeVerifier = generateCodeVerifier();
   const codeChallenge = await generateCodeChallenge(codeVerifier);
-  sessionStorage.setItem(CODE_VERIFIER_KEY, codeVerifier);
+  sessionStorage.setItem(STORAGE_KEYS.pkceCodeVerifier, codeVerifier);
 
+  const redirectUri = getRedirectUri();
   const params = new URLSearchParams({
     client_id: clientId,
     response_type: "code",
@@ -65,8 +74,9 @@ export async function getHostedSignupUrl() {
 
   const codeVerifier = generateCodeVerifier();
   const codeChallenge = await generateCodeChallenge(codeVerifier);
-  sessionStorage.setItem(CODE_VERIFIER_KEY, codeVerifier);
+  sessionStorage.setItem(STORAGE_KEYS.pkceCodeVerifier, codeVerifier);
 
+  const redirectUri = getRedirectUri();
   const params = new URLSearchParams({
     client_id: clientId,
     response_type: "code",
@@ -95,7 +105,7 @@ export function clearCodeFromUrl() {
   url.searchParams.delete("error");
   url.searchParams.delete("error_description");
   // Reset to home page if on callback route
-  if (url.pathname === '/callback') {
+  if (url.pathname === AUTH_CONFIG.callbackPath) {
     url.pathname = '/';
   }
   window.history.replaceState({}, "", url.toString());
@@ -114,7 +124,10 @@ export function getAuthErrorFromUrl() {
 export async function exchangeAuthCodeForTokens(code) {
   assertAuthConfig();
 
-  const codeVerifier = sessionStorage.getItem(CODE_VERIFIER_KEY);
+  const codeVerifier =
+    sessionStorage.getItem(STORAGE_KEYS.pkceCodeVerifier)
+    || sessionStorage.getItem(LEGACY_STORAGE_KEYS.pkceCodeVerifier);
+  const redirectUri = getRedirectUri();
   const body = new URLSearchParams({
     grant_type: "authorization_code",
     client_id: clientId,
@@ -137,7 +150,8 @@ export async function exchangeAuthCodeForTokens(code) {
     throw new Error(result.error_description || result.error || "Token exchange failed");
   }
 
-  sessionStorage.removeItem(CODE_VERIFIER_KEY);
+  sessionStorage.removeItem(STORAGE_KEYS.pkceCodeVerifier);
+  sessionStorage.removeItem(LEGACY_STORAGE_KEYS.pkceCodeVerifier);
   return result;
 }
 
@@ -189,8 +203,9 @@ export function decodeJwt(token) {
 export function logoutFromCognito() {
   assertAuthConfig();
 
+  const redirectUri = getRedirectUri();
   // Cognito matches sign-out URLs strictly, so keep a stable trailing slash.
-  const logoutRedirectUri = redirectUri.replace('/callback', '/');
+  const logoutRedirectUri = redirectUri.replace(AUTH_CONFIG.callbackPath, '/');
   console.info("[auth] Redirecting to Cognito logout", {
     cognitoDomain,
     clientId,
