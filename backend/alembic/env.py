@@ -12,8 +12,7 @@ from pathlib import Path
 # Add parent directory to path so we can import app
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from app.auth_usermanagement.config import get_settings
-from app.auth_usermanagement.database import Base
+from app.database import Base, DATABASE_URL
 # Import all models so Alembic can detect them
 from app.auth_usermanagement.models import (
     Tenant,
@@ -27,9 +26,8 @@ from app.auth_usermanagement.models import (
 # access to the values within the .ini file in use.
 config = context.config
 
-# Set database URL from our application settings
-settings = get_settings()
-config.set_main_option("sqlalchemy.url", settings.database_url)
+# Set database URL from host application runtime settings
+config.set_main_option("sqlalchemy.url", DATABASE_URL)
 
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.

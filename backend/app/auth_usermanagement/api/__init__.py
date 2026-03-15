@@ -12,7 +12,8 @@ Phases:
 - Phase 9: User management (GET /users, PATCH /users/{id}/role, DELETE /users/{id})
 """
 
-from fastapi import APIRouter, Header, HTTPException, status, Depends
+from fastapi import APIRouter, Header, HTTPException, Request, Response, status, Depends
+from pydantic import BaseModel
 from typing import Optional, List
 from sqlalchemy.orm import Session
 from uuid import UUID
@@ -49,7 +50,11 @@ from ..schemas.user_management import (
     UpdateUserRoleResponse,
     RemoveUserResponse,
 )
-from ..database import get_db
+from ..schemas.session import (
+    SessionRegisterRequest,
+    SessionRotateRequest,
+)
+from app.database import get_db
 from ..services.user_service import sync_user_from_cognito
 from ..services.tenant_service import create_tenant, get_user_tenants
 from ..services.invitation_service import (
@@ -64,7 +69,22 @@ from ..services.user_management_service import (
     remove_user_from_tenant,
 )
 from ..services.audit_service import log_audit_event
-from ..services.session_service import revoke_user_session, revoke_all_user_sessions
+from ..services.session_service import (
+    create_user_session,
+    rotate_user_session,
+    revoke_user_session,
+    revoke_all_user_sessions,
+)
+from ..services.cookie_token_service import (
+    set_refresh_cookie,
+    clear_refresh_cookie,
+    call_cognito_refresh,
+    COOKIE_NAME,
+    store_refresh_token,
+    get_refresh_token,
+    rotate_refresh_token,
+    revoke_refresh_token,
+)
 from ..services.user_service import suspend_user, unsuspend_user
 from ..models.user import User
 from ..config import get_settings
@@ -794,6 +814,75 @@ async def revoke_all_sessions(
     }
 
 
+@router.post("/sessions/register")
+async def register_session(
+    payload: SessionRegisterRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Create a refresh-token-backed session for current user."""
+    created = create_user_session(
+        db=db,
+        user_id=current_user.id,
+        refresh_token=payload.refresh_token,
+        user_agent=payload.user_agent,
+        ip_address=payload.ip_address,
+        device_info=payload.device_info,
+        expires_at=payload.expires_at,
+    )
+
+    log_audit_event(
+        "session_registered",
+        actor_user_id=str(current_user.id),
+        session_id=str(created.id),
+    )
+
+    return {
+        "session_id": str(created.id),
+        "user_id": str(current_user.id),
+        "revoked_at": None,
+        "message": "Session registered successfully",
+    }
+
+
+@router.post("/sessions/{session_id}/rotate")
+async def rotate_session(
+    session_id: UUID,
+    payload: SessionRotateRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Rotate refresh token by revoking current session and issuing replacement."""
+    rotated = rotate_user_session(
+        db=db,
+        user_id=current_user.id,
+        session_id=session_id,
+        old_refresh_token=payload.old_refresh_token,
+        new_refresh_token=payload.new_refresh_token,
+        user_agent=payload.user_agent,
+        ip_address=payload.ip_address,
+        device_info=payload.device_info,
+        expires_at=payload.expires_at,
+    )
+
+    if not rotated:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
+
+    log_audit_event(
+        "session_rotated",
+        actor_user_id=str(current_user.id),
+        previous_session_id=str(session_id),
+        new_session_id=str(rotated.id),
+    )
+
+    return {
+        "session_id": str(rotated.id),
+        "user_id": str(current_user.id),
+        "revoked_at": None,
+        "message": "Session rotated successfully",
+    }
+
+
 @router.delete("/sessions/{session_id}")
 async def revoke_session(
     session_id: UUID,
@@ -938,3 +1027,107 @@ async def unsuspend_user_account(
 
 # Placeholder routes will be added as each phase is completed
 # This ensures the router is properly registered from the start
+
+
+class _StoreRefreshPayload(BaseModel):
+    refresh_token: str
+
+
+@router.post("/cookie/store-refresh")
+async def store_refresh_cookie(
+    payload: _StoreRefreshPayload,
+    response: Response,
+    current_user: User = Depends(get_current_user),
+):
+    """Store Cognito refresh token in an HttpOnly cookie after login.
+
+    Called once by the frontend immediately after exchanging the PKCE auth code.
+    Moves the refresh token from JS-accessible memory into an HttpOnly, SameSite=Strict
+    cookie scoped to the /auth/token path.
+    """
+    settings = get_settings()
+    cookie_key = store_refresh_token(payload.refresh_token)
+    set_refresh_cookie(response, cookie_key, secure=settings.cookie_secure)
+    log_audit_event("refresh_cookie_stored", actor_user_id=str(current_user.id))
+    return {"message": "Refresh token stored"}
+
+
+@router.post("/token/refresh")
+async def token_refresh(
+    request: Request,
+    response: Response,
+    x_requested_with: Optional[str] = Header(None),
+):
+    """Exchange the HttpOnly refresh cookie for a new access token.
+
+    - Reads the refresh token from the HttpOnly cookie (never from request body).
+    - Requires X-Requested-With: XMLHttpRequest header as CSRF defence-in-depth
+      (cookie is SameSite=Strict so cross-site requests are already blocked).
+    - Proxies grant to Cognito and returns {access_token, id_token, expires_in}.
+    - If Cognito returns a rotated refresh_token, the cookie is updated in-place.
+    """
+    if not x_requested_with or x_requested_with.lower() != "xmlhttprequest":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="X-Requested-With: XMLHttpRequest header required",
+        )
+
+    cookie_key = request.cookies.get(COOKIE_NAME)
+    if not cookie_key:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="No refresh token cookie present",
+        )
+
+    refresh_token = get_refresh_token(cookie_key)
+    if not refresh_token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="No refresh token cookie present",
+        )
+
+    settings = get_settings()
+    if not settings.cognito_domain or not settings.cognito_client_id:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Cognito is not configured on this server",
+        )
+
+    try:
+        tokens = call_cognito_refresh(
+            refresh_token=refresh_token,
+            cognito_domain=settings.cognito_domain,
+            client_id=settings.cognito_client_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=str(exc),
+        ) from exc
+
+    # Rotate cookie if Cognito issues a new refresh token
+    if tokens.get("refresh_token"):
+        new_cookie_key = rotate_refresh_token(cookie_key, tokens["refresh_token"])
+        set_refresh_cookie(response, new_cookie_key, secure=settings.cookie_secure)
+
+    return {
+        "access_token": tokens.get("access_token"),
+        "id_token": tokens.get("id_token"),
+        "expires_in": tokens.get("expires_in", 3600),
+    }
+
+
+@router.post("/cookie/clear-refresh")
+async def clear_refresh(
+    request: Request,
+    response: Response,
+):
+    """Expire the HttpOnly refresh-token cookie.
+
+    Called on logout. No authentication required — the access token may already
+    be gone when this is called.
+    """
+    settings = get_settings()
+    revoke_refresh_token(request.cookies.get(COOKIE_NAME, ""))
+    clear_refresh_cookie(response, secure=settings.cookie_secure)
+    return {"message": "Refresh cookie cleared"}

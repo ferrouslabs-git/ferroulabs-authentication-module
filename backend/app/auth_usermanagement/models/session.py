@@ -7,7 +7,7 @@ from sqlalchemy.orm import relationship
 from datetime import UTC, datetime
 from uuid import uuid4
 
-from ..database import Base
+from app.database import Base
 
 
 def utc_now() -> datetime:
@@ -25,6 +25,10 @@ class Session(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     refresh_token_hash = Column(String(255), nullable=False)
+    user_agent = Column(String(512), nullable=True)
+    ip_address = Column(String(64), nullable=True)
+    device_info = Column(String(255), nullable=True)
+    expires_at = Column(DateTime, nullable=True)
     
     created_at = Column(DateTime, default=utc_now, nullable=False)
     revoked_at = Column(DateTime)

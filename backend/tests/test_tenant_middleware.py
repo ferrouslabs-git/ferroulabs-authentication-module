@@ -1,9 +1,20 @@
 """Unit tests for tenant isolation middleware behavior."""
 import asyncio
+from types import SimpleNamespace
 from uuid import uuid4
 
+from fastapi.testclient import TestClient
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
 from starlette.requests import Request
 
+from app.database import Base, get_db
+from app.main import app
+from app.auth_usermanagement.models.membership import Membership
+from app.auth_usermanagement.models.tenant import Tenant
+from app.auth_usermanagement.models.user import User
+from app.auth_usermanagement.security import dependencies as security_dependencies
 from app.auth_usermanagement.security.tenant_middleware import TenantContextMiddleware
 
 
@@ -56,3 +67,66 @@ def test_protected_route_requires_tenant_header():
     assert response.status_code == 400
     body = response.body.decode("utf-8")
     assert "X-Tenant-ID header required" in body
+
+
+def test_cross_tenant_access_blocked_at_api_level(monkeypatch):
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    SessionLocal = sessionmaker(bind=engine)
+    Base.metadata.create_all(engine)
+
+    session = SessionLocal()
+    user = User(
+        cognito_sub="middleware-api-sub",
+        email="middleware-api@example.com",
+        name="Middleware API User",
+    )
+    tenant_a = Tenant(name="Tenant A")
+    tenant_b = Tenant(name="Tenant B")
+    session.add_all([user, tenant_a, tenant_b])
+    session.flush()
+    session.add(
+        Membership(
+            user_id=user.id,
+            tenant_id=tenant_a.id,
+            role="owner",
+            status="active",
+        )
+    )
+    session.commit()
+    user_sub = user.cognito_sub
+    tenant_b_id = str(tenant_b.id)
+    session.close()
+
+    def _override_get_db():
+        db = SessionLocal()
+        try:
+            yield db
+        finally:
+            db.close()
+
+    monkeypatch.setattr(
+        security_dependencies,
+        "verify_token",
+        lambda _token: SimpleNamespace(sub=user_sub),
+    )
+    app.dependency_overrides[get_db] = _override_get_db
+
+    try:
+        with TestClient(app) as client:
+            response = client.get(
+                "/auth/tenant-context",
+                headers={
+                    "Authorization": "Bearer fake-token",
+                    "X-Tenant-ID": tenant_b_id,
+                },
+            )
+    finally:
+        app.dependency_overrides.clear()
+        Base.metadata.drop_all(engine)
+
+    assert response.status_code == 403
+    assert "Access denied" in response.text

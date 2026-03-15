@@ -34,6 +34,11 @@ from .user_management import (
     UpdateUserRoleResponse,
     RemoveUserResponse,
 )
+from .session import (
+    SessionRegisterRequest,
+    SessionRotateRequest,
+    SessionResponse,
+)
 
 __all__ = [
     "TokenPayload",
@@ -50,4 +55,7 @@ __all__ = [
     "UpdateUserRoleRequest",
     "UpdateUserRoleResponse",
     "RemoveUserResponse",
+    "SessionRegisterRequest",
+    "SessionRotateRequest",
+    "SessionResponse",
 ]

@@ -1,4 +1,5 @@
 """Session revocation service functions."""
+import hashlib
 from datetime import UTC, datetime
 from uuid import UUID
 
@@ -10,6 +11,93 @@ from ..models.session import Session as AuthSession
 def utc_now() -> datetime:
     """Return naive UTC datetime compatible with existing DB DateTime columns."""
     return datetime.now(UTC).replace(tzinfo=None)
+
+
+def _hash_refresh_token(refresh_token: str) -> str:
+    return hashlib.sha256(refresh_token.encode("utf-8")).hexdigest()
+
+
+def create_user_session(
+    db: Session,
+    user_id: UUID,
+    refresh_token: str,
+    *,
+    user_agent: str | None = None,
+    ip_address: str | None = None,
+    device_info: str | None = None,
+    expires_at: datetime | None = None,
+) -> AuthSession:
+    """Create and persist a new refresh-token-backed session."""
+    auth_session = AuthSession(
+        user_id=user_id,
+        refresh_token_hash=_hash_refresh_token(refresh_token),
+        user_agent=user_agent,
+        ip_address=ip_address,
+        device_info=device_info,
+        expires_at=expires_at,
+    )
+    db.add(auth_session)
+    db.commit()
+    db.refresh(auth_session)
+    return auth_session
+
+
+def validate_refresh_session(
+    db: Session,
+    user_id: UUID,
+    session_id: UUID,
+    refresh_token: str,
+) -> AuthSession | None:
+    """Validate refresh token against an active, non-expired session."""
+    auth_session = db.query(AuthSession).filter(
+        AuthSession.id == session_id,
+        AuthSession.user_id == user_id,
+        AuthSession.revoked_at.is_(None),
+    ).first()
+
+    if not auth_session:
+        return None
+
+    if auth_session.expires_at and auth_session.expires_at <= utc_now():
+        return None
+
+    if auth_session.refresh_token_hash != _hash_refresh_token(refresh_token):
+        return None
+
+    return auth_session
+
+
+def rotate_user_session(
+    db: Session,
+    user_id: UUID,
+    session_id: UUID,
+    old_refresh_token: str,
+    new_refresh_token: str,
+    *,
+    user_agent: str | None = None,
+    ip_address: str | None = None,
+    device_info: str | None = None,
+    expires_at: datetime | None = None,
+) -> AuthSession | None:
+    """Rotate refresh token by revoking old session and creating a replacement."""
+    existing = validate_refresh_session(db, user_id, session_id, old_refresh_token)
+    if not existing:
+        return None
+
+    existing.revoked_at = utc_now()
+
+    replacement = AuthSession(
+        user_id=user_id,
+        refresh_token_hash=_hash_refresh_token(new_refresh_token),
+        user_agent=user_agent or existing.user_agent,
+        ip_address=ip_address or existing.ip_address,
+        device_info=device_info or existing.device_info,
+        expires_at=expires_at or existing.expires_at,
+    )
+    db.add(replacement)
+    db.commit()
+    db.refresh(replacement)
+    return replacement
 
 
 def revoke_user_session(db: Session, user_id: UUID, session_id: UUID) -> AuthSession | None:

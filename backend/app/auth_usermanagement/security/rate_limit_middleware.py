@@ -27,6 +27,8 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             "/auth/sync",
             "/auth/invite",
             "/auth/invites/accept",
+            "/auth/token/refresh",
+            "/auth/cookie/store-refresh",
         }
 
     async def dispatch(self, request: Request, call_next):

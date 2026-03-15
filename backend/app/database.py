@@ -1,10 +1,12 @@
-"""
-Database configuration for auth module.
+"""Host application database runtime objects.
+
+This module is the single source of truth for engine/session/Base ownership.
+Reusable modules must import DB runtime objects from here.
 """
 import os
+from collections.abc import Generator
 from sqlalchemy import create_engine
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import sessionmaker, declarative_base, Session
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -15,7 +17,8 @@ engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
-def get_db():
+
+def get_db() -> Generator[Session, None, None]:
     """Get database session."""
     db = SessionLocal()
     try:

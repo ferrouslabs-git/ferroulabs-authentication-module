@@ -8,7 +8,7 @@ from sqlalchemy.orm import relationship
 from datetime import datetime
 from uuid import uuid4
 
-from ..database import Base
+from app.database import Base
 
 
 class Tenant(Base):

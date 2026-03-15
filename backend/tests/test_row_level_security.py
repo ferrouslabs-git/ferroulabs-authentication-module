@@ -3,10 +3,14 @@ Tests for Row-Level Security (RLS) enforcement.
 
 These tests verify that PostgreSQL RLS policies properly isolate tenant data.
 """
+import os
 import pytest
 from uuid import uuid4
 from datetime import datetime, UTC
-from sqlalchemy import text
+from sqlalchemy import create_engine, text
+from sqlalchemy.orm import Session, sessionmaker
+
+from app.database import DATABASE_URL
 from app.auth_usermanagement.models.tenant import Tenant
 from app.auth_usermanagement.models.user import User
 from app.auth_usermanagement.models.membership import Membership
@@ -18,8 +22,49 @@ def utc_now():
     return datetime.now(UTC).replace(tzinfo=None)
 
 
-# Skip all RLS tests - they require PostgreSQL (RLS not supported in SQLite)
-pytestmark = pytest.mark.skip(reason="RLS tests require PostgreSQL. Run against production database to verify RLS policies.")
+RUN_POSTGRES_RLS_TESTS = os.getenv("RUN_POSTGRES_RLS_TESTS") == "1"
+
+pytestmark = pytest.mark.skipif(
+    not (RUN_POSTGRES_RLS_TESTS and DATABASE_URL.startswith("postgresql")),
+    reason="Set RUN_POSTGRES_RLS_TESTS=1 and use PostgreSQL DATABASE_URL to run RLS tests.",
+)
+
+
+@pytest.fixture
+def db_session() -> Session:
+    """Use PostgreSQL session against migrated schema for RLS behavior tests."""
+    engine = create_engine(DATABASE_URL, pool_pre_ping=True)
+    SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)
+    session = SessionLocal()
+
+    try:
+        # Cleanup with platform-admin context so policies don't block test setup.
+        session.execute(text("SET app.is_platform_admin = 'true'"))
+        session.execute(text("SET app.current_tenant_id = ''"))
+        session.execute(text("DELETE FROM invitations"))
+        session.execute(text("DELETE FROM memberships"))
+        session.execute(text("DELETE FROM sessions"))
+        session.execute(text("DELETE FROM tenants"))
+        session.execute(text("DELETE FROM users"))
+        session.commit()
+
+        session.execute(text("SET app.is_platform_admin = 'false'"))
+        session.execute(text("RESET app.current_tenant_id"))
+        session.commit()
+
+        yield session
+    finally:
+        try:
+            session.execute(text("SET app.is_platform_admin = 'true'"))
+            session.execute(text("SET app.current_tenant_id = ''"))
+            session.execute(text("DELETE FROM invitations"))
+            session.execute(text("DELETE FROM memberships"))
+            session.execute(text("DELETE FROM sessions"))
+            session.execute(text("DELETE FROM tenants"))
+            session.execute(text("DELETE FROM users"))
+            session.commit()
+        finally:
+            session.close()
 
 
 def test_rls_memberships_tenant_isolation(db_session):
@@ -39,18 +84,24 @@ def test_rls_memberships_tenant_isolation(db_session):
     db_session.commit()
     
     # Create memberships
+    db_session.execute(text("SET app.is_platform_admin = 'true'"))
+    db_session.execute(text("SET app.current_tenant_id = ''"))
     membership_a = Membership(user_id=user_a.id, tenant_id=tenant_a.id, role="owner", status="active")
     membership_b = Membership(user_id=user_b.id, tenant_id=tenant_b.id, role="owner", status="active")
     db_session.add(membership_a)
     db_session.add(membership_b)
     db_session.commit()
+
+    db_session.execute(text("SET app.is_platform_admin = 'false'"))
+    db_session.execute(text("RESET app.current_tenant_id"))
+    db_session.commit()
     
     # Set RLS context for tenant A
     db_session.execute(
-        text("SET LOCAL app.current_tenant_id = :tenant_id"),
+        text("SET app.current_tenant_id = :tenant_id"),
         {"tenant_id": str(tenant_a.id)}
     )
-    db_session.execute(text("SET LOCAL app.is_platform_admin = 'false'"))
+    db_session.execute(text("SET app.is_platform_admin = 'false'"))
     db_session.commit()
     
     # Query should only return tenant A memberships
@@ -65,10 +116,10 @@ def test_rls_memberships_tenant_isolation(db_session):
     
     # Set RLS context for tenant B
     db_session.execute(
-        text("SET LOCAL app.current_tenant_id = :tenant_id"),
+        text("SET app.current_tenant_id = :tenant_id"),
         {"tenant_id": str(tenant_b.id)}
     )
-    db_session.execute(text("SET LOCAL app.is_platform_admin = 'false'"))
+    db_session.execute(text("SET app.is_platform_admin = 'false'"))
     db_session.commit()
     
     # Query should only return tenant B memberships
@@ -92,6 +143,8 @@ def test_rls_invitations_tenant_isolation(db_session):
     db_session.commit()
     
     # Create invitations for both tenants
+    db_session.execute(text("SET app.is_platform_admin = 'true'"))
+    db_session.execute(text("SET app.current_tenant_id = ''"))
     invite_a = Invitation(
         tenant_id=tenant_a.id,
         email="invite-a@example.com",
@@ -111,13 +164,17 @@ def test_rls_invitations_tenant_isolation(db_session):
     db_session.add(invite_a)
     db_session.add(invite_b)
     db_session.commit()
+
+    db_session.execute(text("SET app.is_platform_admin = 'false'"))
+    db_session.execute(text("RESET app.current_tenant_id"))
+    db_session.commit()
     
     # Set RLS context for tenant A
     db_session.execute(
-        text("SET LOCAL app.current_tenant_id = :tenant_id"),
+        text("SET app.current_tenant_id = :tenant_id"),
         {"tenant_id": str(tenant_a.id)}
     )
-    db_session.execute(text("SET LOCAL app.is_platform_admin = 'false'"))
+    db_session.execute(text("SET app.is_platform_admin = 'false'"))
     db_session.commit()
     
     # Query should only return tenant A invitations
@@ -129,10 +186,10 @@ def test_rls_invitations_tenant_isolation(db_session):
     db_session.execute(text("RESET app.current_tenant_id"))
     db_session.execute(text("RESET app.is_platform_admin"))
     db_session.execute(
-        text("SET LOCAL app.current_tenant_id = :tenant_id"),
+        text("SET app.current_tenant_id = :tenant_id"),
         {"tenant_id": str(tenant_b.id)}
     )
-    db_session.execute(text("SET LOCAL app.is_platform_admin = 'false'"))
+    db_session.execute(text("SET app.is_platform_admin = 'false'"))
     db_session.commit()
     
     # Query should only return tenant B invitations
@@ -158,6 +215,8 @@ def test_rls_platform_admin_bypass(db_session):
     db_session.commit()
     
     # Create memberships
+    db_session.execute(text("SET app.is_platform_admin = 'true'"))
+    db_session.execute(text("SET app.current_tenant_id = ''"))
     membership_a = Membership(user_id=user_a.id, tenant_id=tenant_a.id, role="owner", status="active")
     membership_b = Membership(user_id=user_b.id, tenant_id=tenant_b.id, role="owner", status="active")
     db_session.add(membership_a)
@@ -165,8 +224,8 @@ def test_rls_platform_admin_bypass(db_session):
     db_session.commit()
     
     # Set RLS context as platform admin (no specific tenant)
-    db_session.execute(text("SET LOCAL app.current_tenant_id = ''"))
-    db_session.execute(text("SET LOCAL app.is_platform_admin = 'true'"))
+    db_session.execute(text("SET app.current_tenant_id = ''"))
+    db_session.execute(text("SET app.is_platform_admin = 'true'"))
     db_session.commit()
     
     # Platform admin should see all memberships
@@ -185,8 +244,13 @@ def test_rls_no_context_blocks_access(db_session):
     db_session.add(user)
     db_session.commit()
     
+    db_session.execute(text("SET app.is_platform_admin = 'true'"))
+    db_session.execute(text("SET app.current_tenant_id = ''"))
     membership = Membership(user_id=user.id, tenant_id=tenant.id, role="owner", status="active")
     db_session.add(membership)
+    db_session.commit()
+    db_session.execute(text("SET app.is_platform_admin = 'false'"))
+    db_session.execute(text("RESET app.current_tenant_id"))
     db_session.commit()
     
     # Query without setting RLS context (no app.current_tenant_id set)

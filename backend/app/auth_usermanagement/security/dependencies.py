@@ -3,12 +3,15 @@ Authentication dependencies for FastAPI endpoints
 """
 from fastapi import Depends, HTTPException, status, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from sqlalchemy import text
 from sqlalchemy.orm import Session
+from uuid import UUID
 
-from ..database import get_db
+from app.database import get_db
 from ..security.jwt_verifier import verify_token
 from ..security.tenant_context import TenantContext
 from ..services.user_service import get_user_by_cognito_sub
+from ..models.membership import Membership
 from ..models.user import User
 
 
@@ -105,12 +108,16 @@ async def get_current_user_optional(
         return None
 
 
-def get_tenant_context(request: Request) -> TenantContext:
+def get_tenant_context(
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> TenantContext:
     """
     Get current request's tenant context.
     
-    This dependency extracts the TenantContext populated by TenantContextMiddleware.
-    Use this in endpoints that need tenant-scoped operations.
+    This dependency validates tenant membership using the same request-scoped
+    DB session used by endpoint handlers.
     
     Usage:
         @router.get("/data")
@@ -130,12 +137,59 @@ def get_tenant_context(request: Request) -> TenantContext:
         TenantContext: Current tenant context with user/tenant/role info
     
     Raises:
-        HTTPException 500: If middleware didn't populate context (config error)
+        HTTPException 400: Missing or invalid X-Tenant-ID header
+        HTTPException 403: User not authorized for requested tenant
     """
-    if not hasattr(request.state, "tenant_context"):
+    if hasattr(request.state, "tenant_context"):
+        return request.state.tenant_context
+
+    tenant_id_str = request.headers.get("X-Tenant-ID")
+    if not tenant_id_str:
         raise HTTPException(
-            status_code=500,
-            detail="Tenant context not available. Ensure TenantContextMiddleware is registered."
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="X-Tenant-ID header required",
         )
-    
-    return request.state.tenant_context
+
+    try:
+        tenant_id = UUID(tenant_id_str)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid X-Tenant-ID format. Must be a valid UUID",
+        ) from exc
+
+    membership = db.query(Membership).filter(
+        Membership.user_id == current_user.id,
+        Membership.tenant_id == tenant_id,
+        Membership.status == "active",
+    ).first()
+
+    if not membership and not current_user.is_platform_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied: You are not a member of this tenant",
+        )
+
+    role = membership.role if membership else "platform_admin"
+    ctx = TenantContext(
+        user_id=current_user.id,
+        tenant_id=tenant_id,
+        role=role,
+        is_platform_admin=current_user.is_platform_admin,
+    )
+
+    request.state.tenant_context = ctx
+
+    # Apply RLS session variables only for PostgreSQL-backed sessions.
+    bind = db.get_bind()
+    if bind is not None and bind.dialect.name == "postgresql":
+        db.execute(
+            text("SET LOCAL app.current_tenant_id = :tenant_id"),
+            {"tenant_id": str(tenant_id)},
+        )
+        db.execute(
+            text("SET LOCAL app.is_platform_admin = :is_admin"),
+            {"is_admin": "true" if current_user.is_platform_admin else "false"},
+        )
+
+    return ctx

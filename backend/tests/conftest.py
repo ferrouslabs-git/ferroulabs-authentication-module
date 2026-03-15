@@ -14,7 +14,7 @@ if str(BACKEND_ROOT) not in sys.path:
 @pytest.fixture
 def db_session():
     """Create an in-memory SQLite database session for testing."""
-    from app.auth_usermanagement.database import Base
+    from app.database import Base
     
     # Create an in-memory SQLite database
     engine = create_engine("sqlite:///:memory:", echo=False)

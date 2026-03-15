@@ -1,29 +1,21 @@
-"""
-Tenant Context Middleware - enforces multi-tenant isolation
+"""Tenant Context Middleware request prechecks for protected auth routes.
 
 This middleware:
-1. Extracts X-Tenant-ID header from request
-2. Validates user has active membership in that tenant
-3. Populates request.state.tenant_context for downstream handlers
-4. Blocks unauthorized cross-tenant access
+1. Enforces presence and format of X-Tenant-ID on protected routes
+2. Enforces Bearer Authorization header presence
+3. Stores requested tenant ID on request.state
+
+Tenant membership validation and tenant context creation are intentionally
+handled in dependency flow using the same request-scoped DB session as handlers.
 """
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
-from starlette.responses import JSONResponse, Response
-from sqlalchemy.orm import Session
-from sqlalchemy import text
+from starlette.responses import JSONResponse
 from uuid import UUID
-
-from ..database import SessionLocal
-from ..security.jwt_verifier import verify_token, InvalidTokenError
-from ..security.tenant_context import TenantContext
-from ..models.user import User
-from ..models.membership import Membership
-
 
 class TenantContextMiddleware(BaseHTTPMiddleware):
     """
-    Middleware to enforce tenant isolation and populate tenant context.
+    Middleware to enforce tenant request prechecks.
     
     Routes that require tenant context:
     - All /auth/* routes EXCEPT /auth/sync, /auth/debug-token, /auth/me, /auth/tenants
@@ -39,8 +31,9 @@ class TenantContextMiddleware(BaseHTTPMiddleware):
     
     For protected routes:
     - Requires X-Tenant-ID header
-    - Validates user membership in that tenant
-    - Populates request.state.tenant_context
+    - Validates header UUID format
+    - Requires Bearer Authorization header
+    - Stores request.state.requested_tenant_id for downstream use
     """
     
     # Routes that don't require tenant context
@@ -81,7 +74,7 @@ class TenantContextMiddleware(BaseHTTPMiddleware):
                 content={"detail": "Invalid X-Tenant-ID format. Must be a valid UUID"}
             )
         
-        # Get and verify JWT token
+        # Ensure auth header is present and has Bearer scheme.
         auth_header = request.headers.get("Authorization", "")
         
         if not auth_header.startswith("Bearer "):
@@ -89,77 +82,13 @@ class TenantContextMiddleware(BaseHTTPMiddleware):
                 status_code=401,
                 content={"detail": "Authorization header missing or invalid"}
             )
-        
-        token = auth_header.replace("Bearer ", "")
-        
-        # Verify token
-        try:
-            token_payload = verify_token(token)
-        except InvalidTokenError as e:
-            return JSONResponse(
-                status_code=401,
-                content={"detail": str(e)}
-            )
-        
-        # Load user and verify tenant membership
-        db: Session = SessionLocal()
-        try:
-            # Get user by cognito_sub
-            user = db.query(User).filter(User.cognito_sub == token_payload.sub).first()
-            
-            if not user:
-                return JSONResponse(
-                    status_code=404,
-                    content={
-                        "detail": "User not found in database",
-                        "hint": "Call POST /auth/sync first to create user record"
-                    }
-                )
-            
-            # Check membership in requested tenant
-            membership = db.query(Membership).filter(
-                Membership.user_id == user.id,
-                Membership.tenant_id == tenant_id,
-                Membership.status == "active"
-            ).first()
-            
-            # Platform admins can access any tenant
-            if not membership and not user.is_platform_admin:
-                return JSONResponse(
-                    status_code=403,
-                    content={
-                        "detail": "Access denied: You are not a member of this tenant",
-                        "tenant_id": str(tenant_id)
-                    }
-                )
-            
-            # Create tenant context
-            role = membership.role if membership else "platform_admin"
-            
-            request.state.tenant_context = TenantContext(
-                user_id=user.id,
-                tenant_id=tenant_id,
-                role=role,
-                is_platform_admin=user.is_platform_admin
-            )
-            
-            # Set PostgreSQL session variables for Row-Level Security
-            db.execute(
-                text("SET LOCAL app.current_tenant_id = :tenant_id"),
-                {"tenant_id": str(tenant_id)}
-            )
-            db.execute(
-                text("SET LOCAL app.is_platform_admin = :is_admin"),
-                {"is_admin": "true" if user.is_platform_admin else "false"}
-            )
-            db.commit()
-            
-            # Continue to endpoint
-            response = await call_next(request)
-            return response
-            
-        finally:
-            db.close()
+
+        # Middleware intentionally does not create DB sessions.
+        # Tenant membership validation and context creation happen in dependencies
+        # using the same request-scoped DB session as endpoint handlers.
+        request.state.requested_tenant_id = tenant_id
+
+        return await call_next(request)
     
     def _should_skip_middleware(self, request: Request) -> bool:
         """
@@ -194,6 +123,10 @@ class TenantContextMiddleware(BaseHTTPMiddleware):
 
         # Session revocation routes are user-scoped, not tenant-scoped.
         if path.startswith("/auth/sessions"):
+            return True
+
+        # Cookie management and token refresh are user-scoped, not tenant-scoped.
+        if path.startswith("/auth/cookie/") or path == "/auth/token/refresh":
             return True
         
         return False
