@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { useAuth } from "../hooks/useAuth";
 import { useRole } from "../hooks/useRole";
 import { UserList } from "../components/UserList";
@@ -12,14 +13,16 @@ import { PERMISSIONS, checkPermission } from "../constants/permissions";
  * Combines user list management with invitation functionality.
  */
 export function AdminDashboard() {
+  const navigate = useNavigate();
   const { user, tenantId } = useAuth();
   const { role } = useRole();
   const [showInviteModal, setShowInviteModal] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
+  const hasTenantSelected = Boolean(tenantId);
 
   // Permission check
-  const canManageUsers = checkPermission(user, PERMISSIONS.REMOVE_USERS);
-  const canInviteUsers = checkPermission(user, PERMISSIONS.INVITE_USERS);
+  const canManageUsers = checkPermission(user, PERMISSIONS.REMOVE_USERS, role);
+  const canInviteUsers = hasTenantSelected && checkPermission(user, PERMISSIONS.INVITE_USERS, role);
   const isPlatformAdmin = user?.is_platform_admin;
 
   // Refresh user list after invitation
@@ -27,6 +30,47 @@ export function AdminDashboard() {
     setRefreshKey(prev => prev + 1);
     setShowInviteModal(false);
   };
+
+  if (!hasTenantSelected) {
+    return (
+      <div style={{
+        padding: '40px 20px',
+        textAlign: 'center',
+        maxWidth: '680px',
+        margin: '0 auto'
+      }}>
+        <div style={{
+          fontSize: '44px',
+          marginBottom: '16px'
+        }}>
+          🧭
+        </div>
+        <h2 style={{ marginBottom: '12px', color: '#333' }}>
+          {isPlatformAdmin ? 'Select a tenant to manage users' : 'No tenant selected'}
+        </h2>
+        <p style={{ color: '#666', lineHeight: 1.6, marginBottom: '20px' }}>
+          {isPlatformAdmin
+            ? 'Choose a tenant from the dashboard first, then return here to invite users, manage roles, and review account status.'
+            : "You don't have any tenant memberships yet. Ask a tenant owner or admin to invite you before using user management."}
+        </p>
+        <button
+          type="button"
+          onClick={() => navigate('/dashboard')}
+          style={{
+            backgroundColor: '#1976d2',
+            color: '#fff',
+            border: 'none',
+            borderRadius: '8px',
+            padding: '10px 18px',
+            fontWeight: 600,
+            cursor: 'pointer'
+          }}
+        >
+          Go To Dashboard
+        </button>
+      </div>
+    );
+  }
 
   if (!canManageUsers && !isPlatformAdmin) {
     return (
@@ -139,6 +183,7 @@ export function AdminDashboard() {
       <UserList
         key={refreshKey}
         canManage={canManageUsers}
+        missingTenantMessage="Select a tenant to load users."
         style={{
           backgroundColor: 'white',
           borderRadius: '8px',

@@ -22,6 +22,13 @@ export const PERMISSIONS = {
 
 // Role definitions with their permissions
 export const ROLE_PERMISSIONS = {
+  owner: [
+    PERMISSIONS.INVITE_USERS,
+    PERMISSIONS.REMOVE_USERS,
+    PERMISSIONS.SUSPEND_USERS,
+    PERMISSIONS.UPDATE_USER_ROLES,
+    PERMISSIONS.VIEW_USERS,
+  ],
   admin: [
     PERMISSIONS.INVITE_USERS,
     PERMISSIONS.REMOVE_USERS,
@@ -45,14 +52,14 @@ export function hasPermission(role, permission) {
 }
 
 // Helper function to check if current user has a permission
-export function checkPermission(currentUser, permission) {
+export function checkPermission(currentUser, permission, tenantRole = null) {
   if (!currentUser) return false;
   
   // Platform admins have all permissions
   if (currentUser.is_platform_admin) return true;
   
   // Check role-based permissions
-  return hasPermission(currentUser.role, permission);
+  return hasPermission(tenantRole || currentUser.role, permission);
 }
 
 // User-friendly permission labels

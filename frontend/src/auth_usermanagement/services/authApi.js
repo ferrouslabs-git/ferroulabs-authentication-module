@@ -115,16 +115,16 @@ export async function clearRefreshCookie() {
   return res.data;
 }
 
-export async function suspendUser(token, userId) {
+export async function suspendUser(token, tenantId, userId) {
   const res = await api.patch(`/users/${userId}/suspend`, null, {
-    headers: authHeaders(token),
+    headers: authHeaders(token, tenantId),
   });
   return res.data;
 }
 
-export async function unsuspendUser(token, userId) {
+export async function unsuspendUser(token, tenantId, userId) {
   const res = await api.patch(`/users/${userId}/unsuspend`, null, {
-    headers: authHeaders(token),
+    headers: authHeaders(token, tenantId),
   });
   return res.data;
 }
@@ -139,6 +139,15 @@ export async function acceptInvitation(authToken, inviteToken) {
     "/invites/accept",
     { token: inviteToken },
     { headers: authHeaders(authToken) }
+  );
+  return res.data;
+}
+
+export async function createTenant(token, tenantName, plan = "free") {
+  const res = await api.post(
+    "/tenants",
+    { name: tenantName, plan },
+    { headers: authHeaders(token) }
   );
   return res.data;
 }

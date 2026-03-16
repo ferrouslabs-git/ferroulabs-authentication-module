@@ -1,13 +1,18 @@
-import { useState } from 'react'
-import { Navigate, Route, Routes, useNavigate } from 'react-router-dom'
-import { AcceptInvitation, AUTH_CONFIG, useAuth } from './auth_usermanagement'
+import { useEffect, useState } from 'react'
+import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
+import { AcceptInvitation, AdminDashboard, AUTH_CONFIG, ProtectedRoute, TenantSwitcher, ToastProvider, useAuth } from './auth_usermanagement'
 import { openHostedLogin, openHostedSignup } from './auth_usermanagement/services/cognitoClient'
+import { createTenant } from './auth_usermanagement/services/authApi'
+
+const ADMIN_ROUTE = '/admin'
 
 function Shell({ children }) {
-  const { isAuthenticated, isLoading, logout } = useAuth()
+  const { isAuthenticated, isLoading, logout, user, tenantId, tenants } = useAuth()
   const navigate = useNavigate()
   const [isSignInRedirecting, setIsSignInRedirecting] = useState(false)
   const [isSignUpRedirecting, setIsSignUpRedirecting] = useState(false)
+  const currentTenant = tenants.find((tenant) => tenant.id === tenantId) || null
+  const canAccessAdmin = Boolean(user?.is_platform_admin || ['owner', 'admin'].includes(currentTenant?.role))
 
   const handleSignIn = async () => {
     setIsSignInRedirecting(true)
@@ -35,6 +40,19 @@ function Shell({ children }) {
     navigate(isAuthenticated ? '/dashboard' : '/')
   }
 
+  const handleAdmin = () => {
+    if (user?.is_platform_admin && !tenantId && tenants.length > 0) {
+      navigate('/dashboard', {
+        state: {
+          focusTenantSelector: true,
+          pendingAdminRoute: true,
+        },
+      })
+      return
+    }
+    navigate(ADMIN_ROUTE)
+  }
+
   return (
     <div style={styles.appFrame}>
       <aside style={styles.sidebar}>
@@ -52,6 +70,17 @@ function Shell({ children }) {
           >
             Home
           </button>
+
+          {isAuthenticated && canAccessAdmin ? (
+            <button
+              type="button"
+              style={styles.adminButton}
+              onClick={handleAdmin}
+              disabled={isLoading}
+            >
+              User Management
+            </button>
+          ) : null}
 
           {!isAuthenticated ? (
             <>
@@ -103,14 +132,124 @@ function LandingPage() {
 }
 
 function DashboardPage() {
-  const { user } = useAuth()
+  const { user, tenantId, tenants, token } = useAuth()
+  const location = useLocation()
+  const navigate = useNavigate()
   const userName = user?.email ? user.email.split('@')[0] : 'user'
+  const pendingAdminRoute = Boolean(location.state?.pendingAdminRoute)
+  const showTenantSelectAssist = Boolean(
+    location.state?.focusTenantSelector &&
+    user?.is_platform_admin &&
+    !tenantId &&
+    tenants.length > 0,
+  )
+
+  const [tenantName, setTenantName] = useState('')
+  const [isCreating, setIsCreating] = useState(false)
+  const [createError, setCreateError] = useState('')
+
+  useEffect(() => {
+    if (!pendingAdminRoute || !tenantId) {
+      return
+    }
+    navigate(ADMIN_ROUTE, { replace: true })
+  }, [pendingAdminRoute, tenantId, navigate])
+
+  const handleOpenUserManagement = () => {
+    if (!tenantId) {
+      return
+    }
+    navigate(ADMIN_ROUTE)
+  }
+
+  const handleCreateTenant = async (e) => {
+    e.preventDefault()
+    if (!tenantName.trim()) {
+      setCreateError('Tenant name is required')
+      return
+    }
+    if (!token) {
+      setCreateError('Not authenticated')
+      return
+    }
+
+    setIsCreating(true)
+    setCreateError('')
+    try {
+      await createTenant(token, tenantName.trim(), 'free')
+      setTenantName('')
+      // Reload the page to fetch updated tenant list
+      window.location.reload()
+    } catch (error) {
+      const errorDetail = error?.response?.data?.detail || error?.message || 'Failed to create tenant'
+      setCreateError(errorDetail)
+      setIsCreating(false)
+    }
+  }
 
   return (
     <div style={styles.heroCard}>
       <p style={styles.kicker}>Dashboard</p>
       <h2 style={styles.heroTitle}>Hi {userName}</h2>
       <p style={styles.heroBody}>You are signed in and viewing the authenticated page.</p>
+
+      {showTenantSelectAssist ? (
+        <div style={styles.assistBox}>
+          <p style={styles.assistTitle}>Select a tenant to continue to User Management.</p>
+          <p style={styles.assistBody}>
+            Choose a tenant below. Once selected, the User Management button will be enabled.
+          </p>
+        </div>
+      ) : null}
+
+      {tenants.length === 0 ? (
+        <div style={styles.createTenantSection}>
+          <p style={styles.sectionTitle}>No Tenants Yet</p>
+          <p style={styles.sectionBody}>Create your first tenant to get started with User Management.</p>
+          
+          <form onSubmit={handleCreateTenant} style={styles.tenantForm}>
+            <input
+              type="text"
+              placeholder="Enter tenant name (e.g., My Company)"
+              value={tenantName}
+              onChange={(e) => setTenantName(e.target.value)}
+              disabled={isCreating}
+              style={styles.tenantInput}
+            />
+            <button
+              type="submit"
+              disabled={isCreating}
+              style={{
+                ...styles.createTenantButton,
+                ...(isCreating ? styles.createTenantButtonDisabled : {}),
+              }}
+            >
+              {isCreating ? 'Creating...' : 'Create Tenant'}
+            </button>
+          </form>
+
+          {createError && (
+            <div style={styles.errorBox}>
+              <p style={styles.errorText}>{createError}</p>
+            </div>
+          )}
+        </div>
+      ) : (
+        <div style={styles.dashboardTools}>
+          <TenantSwitcher label="Tenant For Admin Actions" />
+          <button
+            type="button"
+            onClick={handleOpenUserManagement}
+            disabled={!tenantId}
+            style={{
+              ...styles.dashboardAdminButton,
+              ...(tenantId ? null : styles.dashboardAdminButtonDisabled),
+            }}
+          >
+            Open User Management
+          </button>
+        </div>
+      )}
     </div>
   )
 }
@@ -144,6 +283,18 @@ function App() {
       <Route
         path="/dashboard"
         element={<Shell>{isAuthenticated ? <DashboardPage /> : <Navigate to="/" replace />}</Shell>}
+      />
+      <Route
+        path={ADMIN_ROUTE}
+        element={
+          <Shell>
+            <ProtectedRoute fallback={<Navigate to="/" replace />}>
+              <ToastProvider>
+                <AdminDashboard />
+              </ToastProvider>
+            </ProtectedRoute>
+          </Shell>
+        }
       />
       <Route path={AUTH_CONFIG.callbackPath} element={<Shell><CallbackPage /></Shell>} />
       <Route path={inviteRoutePath} element={<Shell><AcceptInvitation /></Shell>} />
@@ -190,6 +341,16 @@ const styles = {
     background: 'rgba(255, 255, 255, 0.08)',
     color: '#f7fbff',
     fontWeight: 600,
+    cursor: 'pointer',
+  },
+  adminButton: {
+    width: '100%',
+    padding: '12px 14px',
+    borderRadius: '10px',
+    border: '1px solid rgba(255, 209, 102, 0.45)',
+    background: 'rgba(255, 209, 102, 0.18)',
+    color: '#fff7df',
+    fontWeight: 700,
     cursor: 'pointer',
   },
   signInButton: {
@@ -257,6 +418,108 @@ const styles = {
     color: '#2f4f5f',
     fontSize: '1rem',
     lineHeight: 1.6,
+  },
+  assistBox: {
+    marginTop: '16px',
+    marginBottom: '16px',
+    padding: '12px 14px',
+    borderRadius: '10px',
+    background: '#f2f8ff',
+    border: '1px solid #b9d4f2',
+  },
+  assistTitle: {
+    margin: 0,
+    color: '#163b5d',
+    fontWeight: 700,
+  },
+  assistBody: {
+    marginTop: '8px',
+    marginBottom: 0,
+    color: '#35556e',
+    lineHeight: 1.5,
+    fontSize: '0.95rem',
+  },
+  dashboardTools: {
+    marginTop: '18px',
+    display: 'flex',
+    gap: '12px',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+  },
+  dashboardAdminButton: {
+    border: 'none',
+    borderRadius: '8px',
+    padding: '8px 12px',
+    background: '#1f5f73',
+    color: '#fff',
+    fontWeight: 700,
+    cursor: 'pointer',
+  },
+  dashboardAdminButtonDisabled: {
+    background: '#9aa9b2',
+    cursor: 'not-allowed',
+  },
+  createTenantSection: {
+    marginTop: '24px',
+    padding: '20px',
+    borderRadius: '12px',
+    background: '#f5faff',
+    border: '1px solid #c8dff0',
+  },
+  sectionTitle: {
+    margin: 0,
+    marginBottom: '8px',
+    color: '#0f3443',
+    fontWeight: 700,
+    fontSize: '1.1rem',
+  },
+  sectionBody: {
+    margin: 0,
+    marginBottom: '16px',
+    color: '#2f4f5f',
+    fontSize: '0.95rem',
+    lineHeight: 1.5,
+  },
+  tenantForm: {
+    display: 'flex',
+    gap: '10px',
+    marginBottom: '12px',
+    flexWrap: 'wrap',
+  },
+  tenantInput: {
+    flex: 1,
+    minWidth: '200px',
+    padding: '10px 12px',
+    borderRadius: '8px',
+    border: '1px solid #b9d4f2',
+    fontSize: '0.95rem',
+    fontFamily: 'inherit',
+  },
+  createTenantButton: {
+    padding: '10px 16px',
+    borderRadius: '8px',
+    border: 'none',
+    background: '#1f5f73',
+    color: '#fff',
+    fontWeight: 700,
+    cursor: 'pointer',
+    whiteSpace: 'nowrap',
+  },
+  createTenantButtonDisabled: {
+    background: '#9aa9b2',
+    cursor: 'not-allowed',
+  },
+  errorBox: {
+    marginTop: '12px',
+    padding: '12px',
+    borderRadius: '8px',
+    background: '#ffe6e6',
+    border: '1px solid #ff9999',
+  },
+  errorText: {
+    margin: 0,
+    color: '#c41616',
+    fontSize: '0.9rem',
   },
 }
 

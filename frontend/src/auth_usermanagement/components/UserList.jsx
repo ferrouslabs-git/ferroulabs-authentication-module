@@ -14,9 +14,9 @@ import { useToast } from "./Toast";
 import { PERMISSIONS, checkPermission } from "../constants/permissions";
 import { getErrorMessage, getSuccessMessage } from "../utils/errorHandling";
 
-export function UserList({ className, canManage: canManageProp }) {
+export function UserList({ className, canManage: canManageProp, missingTenantMessage = "Select a tenant to view users." }) {
   const { token, tenantId, user: currentUser } = useAuth();
-  const { canManage: canManageRole } = useRole();
+  const { role } = useRole();
   const toast = useToast();
   
   const [users, setUsers] = useState([]);
@@ -38,9 +38,9 @@ export function UserList({ className, canManage: canManageProp }) {
   // Backwards compatible with canManage prop
   const canManage = canManageProp !== undefined 
     ? canManageProp 
-    : checkPermission(currentUser, PERMISSIONS.REMOVE_USERS);
+    : checkPermission(currentUser, PERMISSIONS.REMOVE_USERS, role);
   
-  const canSuspendUsers = checkPermission(currentUser, PERMISSIONS.SUSPEND_USERS);
+  const canSuspendUsers = checkPermission(currentUser, PERMISSIONS.SUSPEND_USERS, role);
 
   useEffect(() => {
     const onResize = () => setIsMobile(window.innerWidth < 768);
@@ -188,10 +188,10 @@ export function UserList({ className, canManage: canManageProp }) {
         await removeTenantUser(token, tenantId, user.user_id);
         toast.success(getSuccessMessage('remove_user', { email: user.email }));
       } else if (action === 'suspend') {
-        await suspendUser(token, user.user_id);
+        await suspendUser(token, tenantId, user.user_id);
         toast.success(getSuccessMessage('suspend_user', { email: user.email }));
       } else if (action === 'unsuspend') {
-        await unsuspendUser(token, user.user_id);
+        await unsuspendUser(token, tenantId, user.user_id);
         toast.success(getSuccessMessage('unsuspend_user', { email: user.email }));
       }
       await loadUsers();
@@ -225,6 +225,21 @@ export function UserList({ className, canManage: canManageProp }) {
 
   return (
     <div className={className}>
+      {!tenantId ? (
+        <div
+          style={{
+            padding: '12px 14px',
+            border: '1px solid #ffe0b2',
+            borderRadius: '6px',
+            backgroundColor: '#fff8ee',
+            color: '#7a4f1e',
+            marginBottom: '12px',
+          }}
+        >
+          {missingTenantMessage}
+        </div>
+      ) : null}
+
       {lastFailedOperation && (
         <div style={{
           backgroundColor: '#fff3cd',
@@ -335,7 +350,7 @@ export function UserList({ className, canManage: canManageProp }) {
         </div>
       ) : null}
 
-      {!isLoading && users.length === 0 ? (
+      {!isLoading && users.length === 0 && tenantId ? (
         <div style={{ padding: '40px', textAlign: 'center', color: '#666' }}>
           <div style={{ fontSize: '14px' }}>No users found in this tenant.</div>
         </div>

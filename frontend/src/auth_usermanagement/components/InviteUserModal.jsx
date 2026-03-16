@@ -8,11 +8,11 @@ import { getErrorMessage, getSuccessMessage } from "../utils/errorHandling";
 
 export function InviteUserModal({ className, onClose, onSuccess }) {
   const { token, tenantId, user: currentUser } = useAuth();
-  const { canManage } = useRole();
+  const { role: tenantRole } = useRole();
   const toast = useToast();
   
   // Permission check using standardized constant
-  const canInvite = checkPermission(currentUser, PERMISSIONS.INVITE_USERS);
+  const canInvite = checkPermission(currentUser, PERMISSIONS.INVITE_USERS, tenantRole);
   
   const [email, setEmail] = useState("");
   const [role, setRole] = useState("member");
@@ -66,6 +66,13 @@ export function InviteUserModal({ className, onClose, onSuccess }) {
 
   const handleSubmit = async (event) => {
     event.preventDefault();
+
+    if (!tenantId) {
+      const message = "Please select a tenant before inviting users.";
+      setValidationError(message);
+      toast.error(message);
+      return;
+    }
     
     // Permission check using standardized constant
     if (!canInvite) {
@@ -128,6 +135,21 @@ export function InviteUserModal({ className, onClose, onSuccess }) {
         }}
       >
         <h3 style={{ marginTop: 0 }}>Invite User</h3>
+
+        {!tenantId ? (
+          <p style={{
+            marginTop: '0',
+            marginBottom: '12px',
+            padding: '8px 10px',
+            borderRadius: '4px',
+            border: '1px solid #ffe0b2',
+            backgroundColor: '#fff8ee',
+            color: '#7a4f1e',
+            fontSize: '13px'
+          }}>
+            Select a tenant first to send invitations.
+          </p>
+        ) : null}
         
         <label htmlFor="invite-email" style={{ display: 'block', marginBottom: 4, fontWeight: 500 }}>
           Email <span style={{ color: '#d32f2f' }}>*</span>
@@ -195,14 +217,14 @@ export function InviteUserModal({ className, onClose, onSuccess }) {
           </button>
           <button 
             type="submit" 
-            disabled={isSubmitting || !email.trim()}
+            disabled={isSubmitting || !email.trim() || !tenantId}
             style={{
               padding: '8px 24px',
               border: 'none',
               borderRadius: 4,
-              background: isSubmitting || !email.trim() ? '#ccc' : '#0066cc',
+              background: isSubmitting || !email.trim() || !tenantId ? '#ccc' : '#0066cc',
               color: 'white',
-              cursor: isSubmitting || !email.trim() ? 'not-allowed' : 'pointer',
+              cursor: isSubmitting || !email.trim() || !tenantId ? 'not-allowed' : 'pointer',
               fontWeight: 500,
             }}
           >
