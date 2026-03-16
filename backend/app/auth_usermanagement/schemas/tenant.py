@@ -85,3 +85,19 @@ class TenantListResponse(BaseModel):
                 "created_at": "2026-03-08T02:00:18.602279"
             }
         }
+
+
+class TenantStatusResponse(BaseModel):
+    tenant_id: UUID
+    status: str
+    message: str
+
+
+class PlatformTenantResponse(BaseModel):
+    tenant_id: UUID
+    name: str
+    plan: str
+    status: str
+    created_at: datetime
+    member_count: int
+    owner_count: int

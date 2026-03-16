@@ -37,6 +37,7 @@ def build_user_status_response(user: User, message: str, suspended_at: str | Non
     return {
         "user_id": str(user.id),
         "email": user.email,
+        "is_platform_admin": user.is_platform_admin,
         "is_active": user.is_active,
         "suspended_at": suspended_at,
         "message": message,
@@ -88,4 +89,7 @@ async def create_invitation_response(
         token=invitation.token,
         expires_at=invitation.expires_at,
         message=message,
+        status=invitation.status,
+        email_sent=email_result.sent,
+        email_detail=email_result.detail,
     )

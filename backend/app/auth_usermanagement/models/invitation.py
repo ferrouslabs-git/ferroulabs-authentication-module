@@ -29,6 +29,7 @@ class Invitation(Base):
     token = Column(String(255), unique=True, nullable=False, index=True)
     expires_at = Column(DateTime, nullable=False)
     accepted_at = Column(DateTime)
+    revoked_at = Column(DateTime)
     created_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"))
     
     created_at = Column(DateTime, default=utc_now, nullable=False)
@@ -49,3 +50,19 @@ class Invitation(Base):
     def is_accepted(self):
         """Check if invitation has been accepted"""
         return self.accepted_at is not None
+
+    @property
+    def is_revoked(self):
+        """Check if invitation has been revoked by an admin."""
+        return self.revoked_at is not None
+
+    @property
+    def status(self):
+        """Return lifecycle state used by API responses."""
+        if self.is_revoked:
+            return "revoked"
+        if self.is_accepted:
+            return "accepted"
+        if self.is_expired:
+            return "expired"
+        return "pending"

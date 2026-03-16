@@ -92,7 +92,11 @@ export function InviteUserModal({ className, onClose, onSuccess }) {
 
     try {
       const result = await inviteTenantUser(token, tenantId, email.trim(), role);
-      toast.success(getSuccessMessage('invite_user', { email }));
+      if (result?.email_sent) {
+        toast.success(result.message || getSuccessMessage('invite_user', { email }));
+      } else {
+        toast.warning(result?.message || 'Invitation created, but email delivery failed.');
+      }
       
       if (onSuccess) {
         await onSuccess();

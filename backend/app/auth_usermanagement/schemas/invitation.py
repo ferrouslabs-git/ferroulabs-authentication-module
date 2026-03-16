@@ -26,6 +26,9 @@ class InvitationCreateResponse(BaseModel):
     token: str
     expires_at: datetime
     message: str
+    status: Literal["pending", "accepted", "expired", "revoked"]
+    email_sent: bool
+    email_detail: str | None = None
 
 
 class InvitationPreviewResponse(BaseModel):
@@ -36,8 +39,16 @@ class InvitationPreviewResponse(BaseModel):
     email: EmailStr
     role: str
     expires_at: datetime
+    status: Literal["pending", "accepted", "expired", "revoked"]
     is_expired: bool
     is_accepted: bool
+
+
+class InvitationRevokeResponse(BaseModel):
+    invitation_id: UUID
+    tenant_id: UUID
+    status: Literal["revoked"]
+    message: str
 
 
 class InvitationAcceptRequest(BaseModel):

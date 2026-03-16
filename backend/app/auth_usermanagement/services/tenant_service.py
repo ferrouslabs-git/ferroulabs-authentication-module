@@ -1,7 +1,7 @@
 """
 Tenant service - handles tenant creation and management
 """
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 from typing import List, Optional
 from uuid import UUID
 
@@ -121,6 +121,27 @@ def get_user_tenant_role(
     return membership.role if membership else None
 
 
+def list_platform_tenants(db: Session) -> List[dict]:
+    tenants = db.query(Tenant).options(selectinload(Tenant.memberships)).order_by(Tenant.name.asc()).all()
+
+    return [
+        {
+            "tenant_id": tenant.id,
+            "name": tenant.name,
+            "plan": tenant.plan,
+            "status": tenant.status,
+            "created_at": tenant.created_at,
+            "member_count": sum(1 for membership in tenant.memberships if membership.status == "active"),
+            "owner_count": sum(
+                1
+                for membership in tenant.memberships
+                if membership.status == "active" and membership.role == "owner"
+            ),
+        }
+        for tenant in tenants
+    ]
+
+
 def verify_user_tenant_access(
     user_id: UUID,
     tenant_id: UUID,
@@ -144,3 +165,27 @@ def verify_user_tenant_access(
     ).first()
     
     return membership is not None
+
+
+def suspend_tenant(tenant_id: UUID, db: Session) -> Tenant:
+    """Suspend a tenant to block organization-level operations."""
+    tenant = get_tenant_by_id(tenant_id, db)
+    if not tenant:
+        raise ValueError(f"Tenant not found: {tenant_id}")
+
+    tenant.status = "suspended"
+    db.commit()
+    db.refresh(tenant)
+    return tenant
+
+
+def unsuspend_tenant(tenant_id: UUID, db: Session) -> Tenant:
+    """Restore a suspended tenant back to active status."""
+    tenant = get_tenant_by_id(tenant_id, db)
+    if not tenant:
+        raise ValueError(f"Tenant not found: {tenant_id}")
+
+    tenant.status = "active"
+    db.commit()
+    db.refresh(tenant)
+    return tenant

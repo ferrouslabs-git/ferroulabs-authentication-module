@@ -18,6 +18,26 @@ class TenantUserResponse(BaseModel):
     joined_at: datetime
 
 
+class PlatformUserMembershipResponse(BaseModel):
+    tenant_id: UUID
+    tenant_name: str
+    role: str
+    status: str
+    joined_at: datetime
+
+
+class PlatformUserResponse(BaseModel):
+    user_id: UUID
+    email: EmailStr
+    name: str | None
+    is_platform_admin: bool
+    is_active: bool
+    suspended_at: datetime | None
+    created_at: datetime
+    updated_at: datetime
+    memberships: list[PlatformUserMembershipResponse]
+
+
 class UpdateUserRoleRequest(BaseModel):
     role: Literal["owner", "admin", "member", "viewer"]
 

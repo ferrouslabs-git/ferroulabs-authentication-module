@@ -16,6 +16,7 @@ from .auth_routes import router as auth_router
 from .invitation_routes import router as invitation_router
 from .permission_demo_routes import router as permission_demo_router
 from .platform_user_routes import router as platform_user_router
+from .platform_tenant_routes import router as platform_tenant_router
 from .refresh_token_routes import router as refresh_token_router
 from .session_routes import router as session_router
 from .tenant_routes import router as tenant_router
@@ -30,4 +31,5 @@ router.include_router(invitation_router)
 router.include_router(tenant_user_router)
 router.include_router(session_router)
 router.include_router(platform_user_router)
+router.include_router(platform_tenant_router)
 router.include_router(refresh_token_router)

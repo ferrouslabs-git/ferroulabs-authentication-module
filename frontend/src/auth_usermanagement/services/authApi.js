@@ -36,6 +36,34 @@ export async function getTenantUsers(token, tenantId) {
   return res.data;
 }
 
+export async function getPlatformUsers(token) {
+  const res = await api.get('/platform/users', {
+    headers: authHeaders(token),
+  });
+  return res.data;
+}
+
+export async function promotePlatformUser(token, userId) {
+  const res = await api.patch(`/platform/users/${userId}/promote`, null, {
+    headers: authHeaders(token),
+  });
+  return res.data;
+}
+
+export async function demotePlatformUser(token, userId) {
+  const res = await api.patch(`/platform/users/${userId}/demote`, null, {
+    headers: authHeaders(token),
+  });
+  return res.data;
+}
+
+export async function getPlatformTenants(token) {
+  const res = await api.get('/platform/tenants', {
+    headers: authHeaders(token),
+  });
+  return res.data;
+}
+
 export async function updateTenantUserRole(token, tenantId, userId, role) {
   const res = await api.patch(
     `/tenants/${tenantId}/users/${userId}/role`,
@@ -149,5 +177,19 @@ export async function createTenant(token, tenantName, plan = "free") {
     { name: tenantName, plan },
     { headers: authHeaders(token) }
   );
+  return res.data;
+}
+
+export async function suspendPlatformTenant(token, tenantId) {
+  const res = await api.patch(`/platform/tenants/${tenantId}/suspend`, null, {
+    headers: authHeaders(token),
+  });
+  return res.data;
+}
+
+export async function unsuspendPlatformTenant(token, tenantId) {
+  const res = await api.patch(`/platform/tenants/${tenantId}/unsuspend`, null, {
+    headers: authHeaders(token),
+  });
   return res.data;
 }

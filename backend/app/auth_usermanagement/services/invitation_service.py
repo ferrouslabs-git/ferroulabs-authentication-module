@@ -33,13 +33,33 @@ def create_invitation(
     created_by: UUID,
     expires_in_days: int = 7,
 ) -> Invitation:
-    """Create a new invitation token for a user email within a tenant."""
+    """Create a new invitation token for a user email within a tenant.
+
+    If a pending invitation already exists for the same email+tenant, revoke the
+    older one so only the latest token remains active.
+    """
+    normalized_email = email.lower().strip()
+    now = utc_now()
+
+    existing_pending = db.query(Invitation).filter(
+        Invitation.tenant_id == tenant_id,
+        Invitation.email == normalized_email,
+        Invitation.accepted_at.is_(None),
+        Invitation.revoked_at.is_(None),
+        Invitation.expires_at > now,
+    ).all()
+
+    for pending in existing_pending:
+        # Revoke previous pending invites so only one active token remains.
+        pending.revoked_at = now
+        pending.expires_at = now
+
     invitation = Invitation(
         tenant_id=tenant_id,
-        email=email.lower().strip(),
+        email=normalized_email,
         role=role,
         token=token_urlsafe(32),
-        expires_at=utc_now() + timedelta(days=expires_in_days),
+        expires_at=now + timedelta(days=expires_in_days),
         created_by=created_by,
     )
     db.add(invitation)
@@ -65,6 +85,9 @@ def accept_invitation(db: Session, invitation: Invitation, user: User) -> Member
     """
     if invitation.is_expired:
         raise ValueError("Invitation has expired")
+
+    if invitation.is_revoked:
+        raise ValueError("Invitation has been revoked")
 
     if invitation.is_accepted:
         raise ValueError("Invitation has already been accepted")
@@ -98,3 +121,28 @@ def accept_invitation(db: Session, invitation: Invitation, user: User) -> Member
     db.commit()
     db.refresh(membership)
     return membership
+
+
+def get_tenant_invitation_by_token(db: Session, tenant_id: UUID, token: str) -> Invitation | None:
+    """Return invitation by token scoped to a tenant."""
+    return db.query(Invitation).filter(
+        Invitation.token == token,
+        Invitation.tenant_id == tenant_id,
+    ).first()
+
+
+def revoke_invitation(db: Session, invitation: Invitation) -> Invitation:
+    """Mark a pending invitation as revoked."""
+    if invitation.is_accepted:
+        raise ValueError("Accepted invitations cannot be revoked")
+    if invitation.is_revoked:
+        raise ValueError("Invitation is already revoked")
+
+    now = utc_now()
+    invitation.revoked_at = now
+    if invitation.expires_at > now:
+        invitation.expires_at = now
+
+    db.commit()
+    db.refresh(invitation)
+    return invitation

@@ -16,6 +16,7 @@ Response schemas:
 """
 from .token import TokenPayload
 from .tenant import (
+    PlatformTenantResponse,
     TenantCreateRequest,
     TenantCreateResponse,
     TenantListResponse,
@@ -29,6 +30,8 @@ from .invitation import (
     InvitationAcceptResponse,
 )
 from .user_management import (
+    PlatformUserMembershipResponse,
+    PlatformUserResponse,
     TenantUserResponse,
     UpdateUserRoleRequest,
     UpdateUserRoleResponse,
@@ -42,6 +45,7 @@ from .session import (
 
 __all__ = [
     "TokenPayload",
+    "PlatformTenantResponse",
     "TenantCreateRequest",
     "TenantCreateResponse",
     "TenantListResponse",
@@ -51,6 +55,8 @@ __all__ = [
     "InvitationPreviewResponse",
     "InvitationAcceptRequest",
     "InvitationAcceptResponse",
+    "PlatformUserMembershipResponse",
+    "PlatformUserResponse",
     "TenantUserResponse",
     "UpdateUserRoleRequest",
     "UpdateUserRoleResponse",

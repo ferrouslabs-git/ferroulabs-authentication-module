@@ -8,7 +8,7 @@ from app.auth_usermanagement.security.guards import require_admin, require_min_r
 from app.auth_usermanagement.security.tenant_context import TenantContext
 
 
-def _ctx(role: str, is_platform_admin: bool = False) -> TenantContext:
+def _ctx(role: str | None, is_platform_admin: bool = False) -> TenantContext:
     return TenantContext(
         user_id=uuid4(),
         tenant_id=uuid4(),
@@ -31,8 +31,16 @@ def test_require_admin_blocks_member():
 
 
 def test_require_admin_allows_platform_admin_regardless_of_role():
-    result = require_admin(_ctx("viewer", is_platform_admin=True))
+    result = require_admin(_ctx(None, is_platform_admin=True))
     assert result.is_platform_admin is True
+
+
+def test_tenant_context_helpers_allow_platform_admin_without_membership_role():
+    ctx = _ctx(None, is_platform_admin=True)
+
+    assert ctx.can_access_tenant() is True
+    assert ctx.is_owner() is False
+    assert ctx.is_admin_or_owner() is False
 
 
 def test_require_min_role_rejects_invalid_role_name():

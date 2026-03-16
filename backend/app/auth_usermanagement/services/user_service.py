@@ -160,3 +160,32 @@ def unsuspend_user(user_id: UUID, db: Session) -> User:
     db.commit()
     db.refresh(user)
     return user
+
+
+def promote_to_platform_admin(user_id: UUID, db: Session) -> User:
+    """Grant platform admin access to a user."""
+    user = get_user_by_id(user_id, db)
+    if not user:
+        raise ValueError(f"User {user_id} not found")
+
+    user.is_platform_admin = True
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+def demote_from_platform_admin(user_id: UUID, db: Session) -> User:
+    """Remove platform admin access from a user while preserving at least one admin."""
+    user = get_user_by_id(user_id, db)
+    if not user:
+        raise ValueError(f"User {user_id} not found")
+
+    if user.is_platform_admin:
+        admin_count = db.query(User).filter(User.is_platform_admin.is_(True)).count()
+        if admin_count <= 1:
+            raise ValueError("Cannot remove the last platform administrator")
+
+    user.is_platform_admin = False
+    db.commit()
+    db.refresh(user)
+    return user

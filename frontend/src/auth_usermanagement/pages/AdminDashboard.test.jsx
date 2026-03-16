@@ -33,7 +33,11 @@ vi.mock('../hooks/useRole', () => ({
 }))
 
 vi.mock('../components/UserList', () => ({
-  UserList: () => <div>Mock User List</div>,
+  UserList: ({ mode }) => <div>Mock User List ({mode})</div>,
+}))
+
+vi.mock('../components/PlatformTenantPanel', () => ({
+  PlatformTenantPanel: () => <div>Mock Platform Tenant Panel</div>,
 }))
 
 vi.mock('../components/InviteUserModal', () => ({
@@ -72,14 +76,15 @@ describe('AdminDashboard No-Tenant UX', () => {
     mockNavigate.mockReset()
   })
 
-  it('shows platform-admin select-tenant guidance when no tenant is selected', () => {
+  it('shows the global directory for platform admins when no tenant is selected', () => {
     authState.user = { is_platform_admin: true }
     authState.tenantId = null
 
     renderPage()
 
-    expect(screen.getByText(/select a tenant to manage users/i)).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /go to dashboard/i })).toBeInTheDocument()
+    expect(screen.getByText(/you are viewing all users across the platform/i)).toBeInTheDocument()
+    expect(screen.getByText('Mock User List (platform)')).toBeInTheDocument()
+    expect(screen.getByText('Mock Platform Tenant Panel')).toBeInTheDocument()
   })
 
   it('shows membership guidance for non-platform users without tenant', () => {

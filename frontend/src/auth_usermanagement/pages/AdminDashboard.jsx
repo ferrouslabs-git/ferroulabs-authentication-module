@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../hooks/useAuth";
 import { useRole } from "../hooks/useRole";
 import { UserList } from "../components/UserList";
+import { PlatformTenantPanel } from "../components/PlatformTenantPanel";
 import { InviteUserModal } from "../components/InviteUserModal";
 import { PERMISSIONS, checkPermission } from "../constants/permissions";
 
@@ -18,12 +19,24 @@ export function AdminDashboard() {
   const { role } = useRole();
   const [showInviteModal, setShowInviteModal] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [viewMode, setViewMode] = useState(user?.is_platform_admin ? 'platform' : 'tenant');
   const hasTenantSelected = Boolean(tenantId);
+  const isPlatformAdmin = user?.is_platform_admin;
 
   // Permission check
   const canManageUsers = checkPermission(user, PERMISSIONS.REMOVE_USERS, role);
-  const canInviteUsers = hasTenantSelected && checkPermission(user, PERMISSIONS.INVITE_USERS, role);
-  const isPlatformAdmin = user?.is_platform_admin;
+  const canInviteUsers = viewMode === 'tenant' && hasTenantSelected && checkPermission(user, PERMISSIONS.INVITE_USERS, role);
+
+  useEffect(() => {
+    if (!isPlatformAdmin) {
+      setViewMode('tenant');
+      return;
+    }
+
+    if (!hasTenantSelected && viewMode === 'tenant') {
+      setViewMode('platform');
+    }
+  }, [hasTenantSelected, isPlatformAdmin, viewMode]);
 
   // Refresh user list after invitation
   const handleInviteSuccess = () => {
@@ -31,7 +44,7 @@ export function AdminDashboard() {
     setShowInviteModal(false);
   };
 
-  if (!hasTenantSelected) {
+  if (!hasTenantSelected && !isPlatformAdmin) {
     return (
       <div style={{
         padding: '40px 20px',
@@ -46,12 +59,10 @@ export function AdminDashboard() {
           🧭
         </div>
         <h2 style={{ marginBottom: '12px', color: '#333' }}>
-          {isPlatformAdmin ? 'Select a tenant to manage users' : 'No tenant selected'}
+          No tenant selected
         </h2>
         <p style={{ color: '#666', lineHeight: 1.6, marginBottom: '20px' }}>
-          {isPlatformAdmin
-            ? 'Choose a tenant from the dashboard first, then return here to invite users, manage roles, and review account status.'
-            : "You don't have any tenant memberships yet. Ask a tenant owner or admin to invite you before using user management."}
+          You don't have any tenant memberships yet. Ask a tenant owner or admin to invite you before using user management.
         </p>
         <button
           type="button"
@@ -92,7 +103,7 @@ export function AdminDashboard() {
         <p style={{ color: '#666', lineHeight: 1.6 }}>
           You don't have permission to access the admin dashboard.
           <br />
-          Only tenant admins and platform administrators can manage users.
+          Only tenant admins and super admins can manage users.
         </p>
         <p style={{ marginTop: '24px', fontSize: '14px', color: '#999' }}>
           Your current role: <strong>{role}</strong>
@@ -126,7 +137,7 @@ export function AdminDashboard() {
             </h1>
             <div style={{ display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
               <span style={{ fontSize: '14px', color: '#666' }}>
-                Role: <strong>{role}</strong>
+                Role: <strong>{role || 'none'}</strong>
               </span>
               {isPlatformAdmin && (
                 <span style={{
@@ -137,7 +148,7 @@ export function AdminDashboard() {
                   fontSize: '12px',
                   fontWeight: 600
                 }}>
-                  Platform Admin
+                  Super Admin
                 </span>
               )}
               {tenantId && (
@@ -152,6 +163,43 @@ export function AdminDashboard() {
               )}
             </div>
           </div>
+
+          {isPlatformAdmin ? (
+            <div style={{ display: 'inline-flex', gap: '8px', flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                onClick={() => setViewMode('platform')}
+                style={{
+                  backgroundColor: viewMode === 'platform' ? '#0f766e' : '#e6f4f1',
+                  color: viewMode === 'platform' ? '#fff' : '#0f766e',
+                  border: '1px solid #0f766e',
+                  borderRadius: '999px',
+                  padding: '8px 14px',
+                  fontWeight: 600,
+                  cursor: 'pointer'
+                }}
+              >
+                Global Directory
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewMode('tenant')}
+                disabled={!hasTenantSelected}
+                style={{
+                  backgroundColor: viewMode === 'tenant' ? '#1976d2' : '#eef4fb',
+                  color: viewMode === 'tenant' ? '#fff' : '#1976d2',
+                  border: '1px solid #1976d2',
+                  borderRadius: '999px',
+                  padding: '8px 14px',
+                  fontWeight: 600,
+                  cursor: hasTenantSelected ? 'pointer' : 'not-allowed',
+                  opacity: hasTenantSelected ? 1 : 0.55
+                }}
+              >
+                Tenant Management
+              </button>
+            </div>
+          ) : null}
 
           {canInviteUsers && (
             <button
@@ -179,18 +227,40 @@ export function AdminDashboard() {
         </div>
       </div>
 
-      {/* User List */}
-      <UserList
-        key={refreshKey}
-        canManage={canManageUsers}
-        missingTenantMessage="Select a tenant to load users."
-        style={{
-          backgroundColor: 'white',
+      {isPlatformAdmin && viewMode === 'platform' ? (
+        <div style={{
+          marginBottom: '20px',
+          padding: '14px 16px',
           borderRadius: '8px',
-          padding: '20px',
-          boxShadow: '0 1px 3px rgba(0,0,0,0.1)'
-        }}
-      />
+          backgroundColor: '#eef8f6',
+          border: '1px solid #b7dfd7',
+          color: '#14564d'
+        }}>
+          You are viewing all users across the platform. Select a tenant only when you want tenant-specific invites, role changes, or removals.
+        </div>
+      ) : null}
+
+      <div style={{
+        display: 'grid',
+        gap: '20px',
+        gridTemplateColumns: 'minmax(0, 1fr)',
+        alignItems: 'start'
+      }}>
+        {isPlatformAdmin && viewMode === 'platform' ? <PlatformTenantPanel /> : null}
+
+        <UserList
+          key={refreshKey}
+          canManage={canManageUsers}
+          mode={viewMode}
+          missingTenantMessage="Select a tenant to load users."
+          style={{
+            backgroundColor: 'white',
+            borderRadius: '8px',
+            padding: '20px',
+            boxShadow: '0 1px 3px rgba(0,0,0,0.1)'
+          }}
+        />
+      </div>
 
       {/* Invite Modal */}
       {showInviteModal && (

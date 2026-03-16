@@ -9,6 +9,8 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.auth_usermanagement.models.user import User
+from app.auth_usermanagement.models.membership import Membership
+from app.auth_usermanagement.models.tenant import Tenant
 from app.auth_usermanagement.security import dependencies as security_dependencies
 from app.database import Base, get_db
 from app.main import app
@@ -27,6 +29,7 @@ def _make_db():
 
 def _seed_users(SessionLocal):
     session = SessionLocal()
+    tenant = Tenant(name="Tenant Alpha")
     admin_user = User(
         cognito_sub="platform-admin-sub",
         email="admin@example.com",
@@ -39,10 +42,19 @@ def _seed_users(SessionLocal):
         name="Target User",
         is_active=True,
     )
-    session.add_all([admin_user, target_user])
+    member_user = User(
+        cognito_sub="member-user-sub",
+        email="member@example.com",
+        name="Member User",
+        is_active=True,
+    )
+    session.add_all([tenant, admin_user, target_user, member_user])
+    session.commit()
+    session.add(Membership(user_id=member_user.id, tenant_id=tenant.id, role="member", status="active"))
     session.commit()
     session.refresh(admin_user)
     session.refresh(target_user)
+    session.refresh(member_user)
     admin_id = str(admin_user.id)
     admin_sub = admin_user.cognito_sub
     target_id = str(target_user.id)
@@ -87,6 +99,7 @@ def test_suspend_and_unsuspend_user_endpoints(monkeypatch):
             assert suspend_response.status_code == 200
             suspend_payload = suspend_response.json()
             assert suspend_payload["user_id"] == target_id
+            assert suspend_payload["is_platform_admin"] is False
             assert suspend_payload["is_active"] is False
             assert suspend_payload["suspended_at"] is not None
 
@@ -97,8 +110,137 @@ def test_suspend_and_unsuspend_user_endpoints(monkeypatch):
             assert unsuspend_response.status_code == 200
             unsuspend_payload = unsuspend_response.json()
             assert unsuspend_payload["user_id"] == target_id
+            assert unsuspend_payload["is_platform_admin"] is False
             assert unsuspend_payload["is_active"] is True
             assert unsuspend_payload["suspended_at"] is None
+    finally:
+        app.dependency_overrides.clear()
+        Base.metadata.drop_all(engine)
+
+
+def test_platform_admin_can_list_all_users(monkeypatch):
+    engine, SessionLocal = _make_db()
+    _, admin_sub, _ = _seed_users(SessionLocal)
+
+    try:
+        with _client_with_auth(monkeypatch, SessionLocal, admin_sub) as client:
+            response = client.get(
+                "/auth/platform/users",
+                headers=_auth_headers(),
+            )
+
+            assert response.status_code == 200
+            payload = response.json()
+            assert len(payload) == 3
+
+            member_entry = next(user for user in payload if user["email"] == "member@example.com")
+            assert member_entry["is_platform_admin"] is False
+            assert len(member_entry["memberships"]) == 1
+            assert member_entry["memberships"][0]["tenant_name"] == "Tenant Alpha"
+            assert member_entry["memberships"][0]["role"] == "member"
+    finally:
+        app.dependency_overrides.clear()
+        Base.metadata.drop_all(engine)
+
+
+def test_platform_user_listing_requires_platform_admin(monkeypatch):
+    engine, SessionLocal = _make_db()
+    session = SessionLocal()
+    regular_user = User(
+        cognito_sub="regular-platform-list-sub",
+        email="regular-platform-list@example.com",
+        name="Regular Platform List",
+        is_platform_admin=False,
+    )
+    session.add(regular_user)
+    session.commit()
+    regular_sub = regular_user.cognito_sub
+    session.close()
+
+    try:
+        with _client_with_auth(monkeypatch, SessionLocal, regular_sub) as client:
+            response = client.get(
+                "/auth/platform/users",
+                headers=_auth_headers(),
+            )
+            assert response.status_code == 403
+            assert response.json()["detail"] == "Only platform administrators can view all users"
+    finally:
+        app.dependency_overrides.clear()
+        Base.metadata.drop_all(engine)
+
+
+def test_platform_admin_can_promote_and_demote_super_admin(monkeypatch):
+    engine, SessionLocal = _make_db()
+    _, admin_sub, target_id = _seed_users(SessionLocal)
+
+    try:
+        with _client_with_auth(monkeypatch, SessionLocal, admin_sub) as client:
+            promote_response = client.patch(
+                f"/auth/platform/users/{target_id}/promote",
+                headers=_auth_headers(),
+            )
+            assert promote_response.status_code == 200
+            assert promote_response.json()["is_platform_admin"] is True
+
+            demote_response = client.patch(
+                f"/auth/platform/users/{target_id}/demote",
+                headers=_auth_headers(),
+            )
+            assert demote_response.status_code == 200
+            assert demote_response.json()["is_platform_admin"] is False
+    finally:
+        app.dependency_overrides.clear()
+        Base.metadata.drop_all(engine)
+
+
+def test_demote_super_admin_rejects_self_target(monkeypatch):
+    engine, SessionLocal = _make_db()
+    admin_id, admin_sub, _ = _seed_users(SessionLocal)
+
+    try:
+        with _client_with_auth(monkeypatch, SessionLocal, admin_sub) as client:
+            response = client.patch(
+                f"/auth/platform/users/{admin_id}/demote",
+                headers=_auth_headers(),
+            )
+            assert response.status_code == 400
+            assert response.json()["detail"] == "You cannot revoke your own super admin access"
+    finally:
+        app.dependency_overrides.clear()
+        Base.metadata.drop_all(engine)
+
+
+def test_promote_super_admin_requires_platform_admin(monkeypatch):
+    engine, SessionLocal = _make_db()
+    session = SessionLocal()
+    regular_user = User(
+        cognito_sub="regular-promote-sub",
+        email="regular-promote@example.com",
+        name="Regular Promote",
+        is_platform_admin=False,
+    )
+    target_user = User(
+        cognito_sub="target-promote-sub",
+        email="target-promote@example.com",
+        name="Target Promote",
+    )
+    session.add_all([regular_user, target_user])
+    session.commit()
+    session.refresh(regular_user)
+    session.refresh(target_user)
+    regular_sub = regular_user.cognito_sub
+    target_id = str(target_user.id)
+    session.close()
+
+    try:
+        with _client_with_auth(monkeypatch, SessionLocal, regular_sub) as client:
+            response = client.patch(
+                f"/auth/platform/users/{target_id}/promote",
+                headers=_auth_headers(),
+            )
+            assert response.status_code == 403
+            assert response.json()["detail"] == "Only platform administrators can promote user accounts"
     finally:
         app.dependency_overrides.clear()
         Base.metadata.drop_all(engine)

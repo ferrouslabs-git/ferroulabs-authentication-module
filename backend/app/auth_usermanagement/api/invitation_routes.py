@@ -12,10 +12,16 @@ from ..schemas.invitation import (
     InvitationCreateRequest,
     InvitationCreateResponse,
     InvitationPreviewResponse,
+    InvitationRevokeResponse,
 )
 from ..security import TenantContext, get_current_user, require_admin
 from ..services.audit_service import log_audit_event
-from ..services.invitation_service import accept_invitation, get_invitation_by_token
+from ..services.invitation_service import (
+    accept_invitation,
+    get_invitation_by_token,
+    get_tenant_invitation_by_token,
+    revoke_invitation,
+)
 from .route_helpers import create_invitation_response, ensure_tenant_access
 
 router = APIRouter()
@@ -59,8 +65,44 @@ async def preview_invitation(token: str, db: Session = Depends(get_db)):
         email=invitation.email,
         role=invitation.role,
         expires_at=invitation.expires_at,
+        status=invitation.status,
         is_expired=invitation.is_expired,
         is_accepted=invitation.is_accepted,
+    )
+
+
+@router.delete("/tenants/{tenant_id}/invites/{token}", response_model=InvitationRevokeResponse)
+async def revoke_tenant_invitation(
+    tenant_id: UUID,
+    token: str,
+    ctx: TenantContext = Depends(require_admin),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Revoke a pending invitation token for a tenant (admin+)."""
+    ensure_tenant_access(tenant_id, ctx)
+    invitation = get_tenant_invitation_by_token(db, tenant_id, token)
+    if not invitation:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invitation not found")
+
+    try:
+        invitation = revoke_invitation(db, invitation)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    log_audit_event(
+        "invitation_revoked",
+        actor_user_id=str(current_user.id),
+        tenant_id=str(tenant_id),
+        invitation_id=str(invitation.id),
+        invited_email=invitation.email,
+    )
+
+    return InvitationRevokeResponse(
+        invitation_id=invitation.id,
+        tenant_id=invitation.tenant_id,
+        status="revoked",
+        message="Invitation revoked successfully",
     )
 
 

@@ -143,5 +143,9 @@ class TenantContextMiddleware(BaseHTTPMiddleware):
         # Cookie management and token refresh are user-scoped, not tenant-scoped.
         if path.startswith(f"{self.auth_prefix}/cookie/") or path == f"{self.auth_prefix}/token/refresh":
             return True
+
+        # Platform-admin routes are global and not tenant-header scoped.
+        if path.startswith(f"{self.auth_prefix}/platform/"):
+            return True
         
         return False

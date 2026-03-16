@@ -124,7 +124,8 @@ def get_tenant_context(
         async def get_data(ctx: TenantContext = Depends(get_tenant_context)):
             # ctx.tenant_id → current tenant UUID
             # ctx.user_id → authenticated user UUID
-            # ctx.role → user's role in this tenant
+            # ctx.role → user's role in this tenant, or None for platform admins
+            # operating without tenant membership
             # ctx.is_platform_admin → platform admin flag
             
             # Query data scoped to ctx.tenant_id
@@ -170,7 +171,7 @@ def get_tenant_context(
             detail="Access denied: You are not a member of this tenant",
         )
 
-    role = membership.role if membership else "platform_admin"
+    role = membership.role if membership else None
     ctx = TenantContext(
         user_id=current_user.id,
         tenant_id=tenant_id,

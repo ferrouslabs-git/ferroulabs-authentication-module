@@ -52,6 +52,16 @@ const OPERATION_CONTEXT = {
     success: "User unsuspended successfully",
     retry: "Please refresh and try again",
   },
+  promote_super_admin: {
+    action: "granting super admin access",
+    success: "User granted super admin access successfully",
+    retry: "Please refresh and try again",
+  },
+  demote_super_admin: {
+    action: "removing super admin access",
+    success: "User removed from super admin successfully",
+    retry: "Please refresh and try again",
+  },
   update_role: {
     action: "updating user role",
     success: "User role updated successfully",

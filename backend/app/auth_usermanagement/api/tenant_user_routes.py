@@ -42,7 +42,14 @@ async def patch_tenant_user_role(
     """Update user's tenant role (admin+)."""
     ensure_tenant_access(tenant_id, ctx)
     try:
-        membership = update_user_role(db, tenant_id, user_id, payload.role)
+        membership = update_user_role(
+            db,
+            tenant_id,
+            user_id,
+            payload.role,
+            actor_role=ctx.role,
+            actor_is_platform_admin=ctx.is_platform_admin,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 

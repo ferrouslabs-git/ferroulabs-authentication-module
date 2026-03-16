@@ -41,15 +41,6 @@ function Shell({ children }) {
   }
 
   const handleAdmin = () => {
-    if (user?.is_platform_admin && !tenantId && tenants.length > 0) {
-      navigate('/dashboard', {
-        state: {
-          focusTenantSelector: true,
-          pendingAdminRoute: true,
-        },
-      })
-      return
-    }
     navigate(ADMIN_ROUTE)
   }
 
@@ -156,7 +147,7 @@ function DashboardPage() {
   }, [pendingAdminRoute, tenantId, navigate])
 
   const handleOpenUserManagement = () => {
-    if (!tenantId) {
+    if (!tenantId && !user?.is_platform_admin) {
       return
     }
     navigate(ADMIN_ROUTE)
@@ -195,9 +186,9 @@ function DashboardPage() {
 
       {showTenantSelectAssist ? (
         <div style={styles.assistBox}>
-          <p style={styles.assistTitle}>Select a tenant to continue to User Management.</p>
+          <p style={styles.assistTitle}>Select a tenant for tenant-scoped management.</p>
           <p style={styles.assistBody}>
-            Choose a tenant below. Once selected, the User Management button will be enabled.
+            You can already open the global user directory as a super admin. Select a tenant below when you want invite and tenant-role controls.
           </p>
         </div>
       ) : null}
@@ -240,10 +231,10 @@ function DashboardPage() {
           <button
             type="button"
             onClick={handleOpenUserManagement}
-            disabled={!tenantId}
+            disabled={!tenantId && !user?.is_platform_admin}
             style={{
               ...styles.dashboardAdminButton,
-              ...(tenantId ? null : styles.dashboardAdminButtonDisabled),
+              ...(tenantId || user?.is_platform_admin ? null : styles.dashboardAdminButtonDisabled),
             }}
           >
             Open User Management

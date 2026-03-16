@@ -94,7 +94,7 @@ describe('Admin Routing Visibility', () => {
     expect(screen.getByRole('button', { name: /^user management$/i })).toBeInTheDocument()
   })
 
-  it('routes platform admin without selected tenant to dashboard tenant assist flow', () => {
+  it('routes platform admin without selected tenant directly to admin dashboard', () => {
     authState.isAuthenticated = true
     authState.user = { is_platform_admin: true }
     authState.tenantId = null
@@ -104,8 +104,7 @@ describe('Admin Routing Visibility', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /^user management$/i }))
 
-    expect(screen.queryByText('Mock Admin Dashboard')).not.toBeInTheDocument()
-    expect(screen.getByText(/select a tenant to continue to user management/i)).toBeInTheDocument()
+    expect(screen.getByText('Mock Admin Dashboard')).toBeInTheDocument()
   })
 
   it('auto-routes from dashboard to admin when pending intent exists and tenant is selected', () => {
