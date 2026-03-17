@@ -30,6 +30,27 @@ pytestmark = pytest.mark.skipif(
 )
 
 
+def _check_not_superuser():
+    """Skip the entire module if the current DB role bypasses RLS."""
+    if not (RUN_POSTGRES_RLS_TESTS and DATABASE_URL.startswith("postgresql")):
+        return
+    engine = create_engine(DATABASE_URL, pool_pre_ping=True)
+    with engine.connect() as conn:
+        row = conn.execute(
+            text("SELECT rolbypassrls FROM pg_roles WHERE rolname = current_user")
+        ).fetchone()
+    engine.dispose()
+    if row and row[0]:
+        pytest.skip(
+            "RLS tests skipped: current DB role has rolbypassrls=true (superuser). "
+            "Re-run with a non-superuser role, e.g.: "
+            "DATABASE_URL=postgresql://rls_tester:rls_tester_pw@localhost:5432/trustos_dev"
+        )
+
+
+_check_not_superuser()
+
+
 @pytest.fixture
 def db_session() -> Session:
     """Use PostgreSQL session against migrated schema for RLS behavior tests."""
