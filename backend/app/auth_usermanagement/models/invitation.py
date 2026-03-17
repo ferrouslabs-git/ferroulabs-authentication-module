@@ -27,6 +27,7 @@ class Invitation(Base):
     email = Column(String(255), nullable=False, index=True)
     role = Column(String(20), nullable=False)  # admin, member, viewer
     token = Column(String(255), unique=True, nullable=False, index=True)
+    token_hash = Column(String(64), nullable=True, index=True)  # SHA256 hex digest
     expires_at = Column(DateTime, nullable=False)
     accepted_at = Column(DateTime)
     revoked_at = Column(DateTime)

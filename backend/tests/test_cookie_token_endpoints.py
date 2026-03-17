@@ -306,18 +306,10 @@ def test_clear_refresh_cookie_removes_cookie():
 
 def test_token_refresh_is_rate_limited():
     """Exceeding the rate limit on /auth/token/refresh returns 429."""
-    from app.auth_usermanagement.security.rate_limit_middleware import RateLimitMiddleware
-
-    # Use a very tight limit (2 requests) so the test runs fast.
-    original_limit = RateLimitMiddleware.__init__
-
-    def _tight_limit(self, app, limit=2, window_seconds=60):
-        original_limit(self, app, limit=limit, window_seconds=window_seconds)
+    from app.auth_usermanagement.services.rate_limiter_service import InMemoryRateLimiter
+    from app.auth_usermanagement.security.rate_limit_middleware import RateLimitMiddleware as RLM
 
     with patch(
-        "app.auth_usermanagement.security.rate_limit_middleware.RateLimitMiddleware.__init__",
-        _tight_limit,
-    ), patch(
         "app.auth_usermanagement.api.get_refresh_token",
         return_value="some-refresh-token",
     ), patch(
@@ -327,18 +319,18 @@ def test_token_refresh_is_rate_limited():
         "app.auth_usermanagement.api.get_settings",
         return_value=_FakeSettings(),
     ):
-        # Re-instantiate the app with the patched middleware so limit takes effect.
+        # Re-instantiate the app with a tight rate limit (2 requests/60s) for testing.
         from fastapi import FastAPI
         from fastapi.middleware.cors import CORSMiddleware
         from app.auth_usermanagement.api import router as auth_router
-        from app.auth_usermanagement.security.rate_limit_middleware import RateLimitMiddleware as RLM
         from app.auth_usermanagement.security.security_headers_middleware import SecurityHeadersMiddleware
         from app.auth_usermanagement.security.tenant_middleware import TenantContextMiddleware
 
         test_app = FastAPI()
         test_app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
         test_app.add_middleware(TenantContextMiddleware)
-        test_app.add_middleware(RLM, limit=2, window_seconds=60)
+        # Inject a rate limiter with limit=2
+        test_app.add_middleware(RLM, limit=2, window_seconds=60, rate_limiter=InMemoryRateLimiter())
         test_app.add_middleware(SecurityHeadersMiddleware)
         test_app.include_router(auth_router, prefix="/auth", tags=["auth"])
 

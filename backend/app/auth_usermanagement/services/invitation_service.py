@@ -2,6 +2,7 @@
 Invitation service - token-based invitations and acceptance workflow
 """
 from datetime import UTC, datetime, timedelta
+from hashlib import sha256
 from secrets import token_urlsafe
 from uuid import UUID
 
@@ -25,18 +26,26 @@ def utc_now() -> datetime:
     return datetime.now(UTC).replace(tzinfo=None)
 
 
+def hash_token(token: str) -> str:
+    """Return SHA256 hex digest of a token for secure storage."""
+    return sha256(token.encode()).hexdigest()
+
+
 def create_invitation(
     db: Session,
     tenant_id: UUID,
     email: str,
     role: str,
     created_by: UUID,
-    expires_in_days: int = 7,
+    expires_in_days: int = 2,
 ) -> Invitation:
     """Create a new invitation token for a user email within a tenant.
 
     If a pending invitation already exists for the same email+tenant, revoke the
     older one so only the latest token remains active.
+    
+    Args:
+        expires_in_days: Days until invitation expires (default 2 days = 48 hours)
     """
     normalized_email = email.lower().strip()
     now = utc_now()
@@ -54,11 +63,13 @@ def create_invitation(
         pending.revoked_at = now
         pending.expires_at = now
 
+    raw_token = token_urlsafe(32)
     invitation = Invitation(
         tenant_id=tenant_id,
         email=normalized_email,
         role=role,
-        token=token_urlsafe(32),
+        token=raw_token,
+        token_hash=hash_token(raw_token),
         expires_at=now + timedelta(days=expires_in_days),
         created_by=created_by,
     )
@@ -69,8 +80,9 @@ def create_invitation(
 
 
 def get_invitation_by_token(db: Session, token: str) -> Invitation | None:
-    """Return invitation by token, or None if missing."""
-    return db.query(Invitation).filter(Invitation.token == token).first()
+    """Return invitation by token hash, or None if missing."""
+    token_hash = hash_token(token)
+    return db.query(Invitation).filter(Invitation.token_hash == token_hash).first()
 
 
 def accept_invitation(db: Session, invitation: Invitation, user: User) -> Membership:
@@ -124,9 +136,10 @@ def accept_invitation(db: Session, invitation: Invitation, user: User) -> Member
 
 
 def get_tenant_invitation_by_token(db: Session, tenant_id: UUID, token: str) -> Invitation | None:
-    """Return invitation by token scoped to a tenant."""
+    """Return invitation by token hash scoped to a tenant."""
+    token_hash = hash_token(token)
     return db.query(Invitation).filter(
-        Invitation.token == token,
+        Invitation.token_hash == token_hash,
         Invitation.tenant_id == tenant_id,
     ).first()
 

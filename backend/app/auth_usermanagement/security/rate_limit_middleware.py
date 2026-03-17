@@ -1,31 +1,45 @@
+"""Rate limiting middleware for auth-sensitive endpoints.
+
+Supports both PostgreSQL-backed distributed limiting and in-memory limiting.
 """
-Simple in-memory rate limiting middleware for auth-sensitive endpoints.
-"""
-from collections import defaultdict, deque
-from datetime import datetime, timedelta
+from typing import Optional, Callable
 
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
 from ..config import get_settings
+from ..services.rate_limiter_service import RateLimiter, create_rate_limiter
 
 
 class RateLimitMiddleware(BaseHTTPMiddleware):
-    """
-    Rate-limit auth endpoints by client IP and path.
+    """Rate-limit auth endpoints by client IP and path.
 
-    Note: in-memory limiter is acceptable for local/dev and single-process deploys.
+    Uses PostgreSQL for distributed limiting if get_db is provided,
+    otherwise falls back to in-memory limiting for single-process deployments.
     """
 
-    def __init__(self, app, limit: int = 30, window_seconds: int = 60, auth_prefix: str | None = None):
+    def __init__(
+        self,
+        app,
+        limit: int = 30,
+        window_seconds: int = 60,
+        auth_prefix: str | None = None,
+        rate_limiter: RateLimiter | None = None,
+        get_db: Optional[Callable] = None,
+    ):
         super().__init__(app)
         self.limit = limit
-        self.window = timedelta(seconds=window_seconds)
-        self.hits = defaultdict(deque)
+        self.window_seconds = window_seconds
         settings = get_settings()
         configured_prefix = auth_prefix or settings.auth_api_prefix
         self.auth_prefix = self._normalize_prefix(configured_prefix)
+
+        # Use provided limiter or create one based on config
+        if rate_limiter:
+            self.rate_limiter = rate_limiter
+        else:
+            self.rate_limiter = create_rate_limiter(get_db)
 
         self.protected_routes = {
             f"{self.auth_prefix}/debug-token",
@@ -53,26 +67,20 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
         client_ip = request.client.host if request.client else "unknown"
         key = f"{client_ip}:{path}"
-        now = datetime.utcnow()
-        q = self.hits[key]
 
-        while q and (now - q[0]) > self.window:
-            q.popleft()
-
-        if len(q) >= self.limit:
-            retry_after = int(self.window.total_seconds())
+        if self.rate_limiter.is_rate_limited(key, self.limit, self.window_seconds):
+            retry_after = self.window_seconds
             return JSONResponse(
                 status_code=429,
                 content={
                     "detail": "Rate limit exceeded. Please retry later.",
                     "path": path,
                     "limit": self.limit,
-                    "window_seconds": int(self.window.total_seconds()),
+                    "window_seconds": self.window_seconds,
                 },
                 headers={"Retry-After": str(retry_after)},
             )
 
-        q.append(now)
         return await call_next(request)
 
     def _is_protected_path(self, path: str) -> bool:
