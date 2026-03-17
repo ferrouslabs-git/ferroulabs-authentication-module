@@ -125,15 +125,27 @@ export async function storeRefreshCookie(token, refreshToken) {
   return res.data;
 }
 
+function _getCookie(name) {
+  const match = document.cookie.split("; ").find((c) => c.startsWith(name + "="));
+  return match ? decodeURIComponent(match.split("=")[1]) : null;
+}
+
 /**
  * Exchange the HttpOnly refresh cookie for new tokens via the backend proxy.
  * No body needed — the browser sends the HttpOnly cookie automatically.
+ * Sends the CSRF token (read from the readable csrf cookie) as X-CSRF-Token header.
  */
 export async function refreshAccessToken() {
+  const csrfToken = _getCookie(AUTH_CONFIG.csrfCookieName);
   const res = await api.post(
     "/token/refresh",
     null,
-    { headers: { "X-Requested-With": "XMLHttpRequest" } },
+    {
+      headers: {
+        "X-Requested-With": "XMLHttpRequest",
+        ...(csrfToken && { "X-CSRF-Token": csrfToken }),
+      },
+    },
   );
   return res.data; // { access_token, id_token, expires_in }
 }

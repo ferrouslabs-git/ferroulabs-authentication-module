@@ -21,6 +21,7 @@ from sqlalchemy.orm import Session
 from ..models.refresh_token import RefreshTokenStore
 
 DEFAULT_COOKIE_NAME = "authum_refresh_token"
+DEFAULT_CSRF_COOKIE_NAME = "authum_csrf_token"
 DEFAULT_COOKIE_PATH = "/auth/token"
 COOKIE_MAX_AGE = 30 * 24 * 60 * 60  # 30 days in seconds
 
@@ -109,6 +110,50 @@ def clear_refresh_cookie(
         key=cookie_name,
         value="",
         httponly=True,
+        secure=secure,
+        samesite="strict",
+        path=cookie_path,
+        max_age=0,
+    )
+
+
+def generate_csrf_token() -> str:
+    """Return a cryptographically random CSRF token."""
+    return secrets.token_urlsafe(32)
+
+
+def set_csrf_cookie(
+    response: Response,
+    csrf_token: str,
+    *,
+    secure: bool = True,
+    csrf_cookie_name: str = DEFAULT_CSRF_COOKIE_NAME,
+    cookie_path: str = DEFAULT_COOKIE_PATH,
+) -> None:
+    """Attach a readable (non-HttpOnly) CSRF token cookie to a FastAPI response."""
+    response.set_cookie(
+        key=csrf_cookie_name,
+        value=csrf_token,
+        httponly=False,  # JS must be able to read this cookie
+        secure=secure,
+        samesite="strict",
+        path=cookie_path,
+        max_age=COOKIE_MAX_AGE,
+    )
+
+
+def clear_csrf_cookie(
+    response: Response,
+    *,
+    secure: bool = True,
+    csrf_cookie_name: str = DEFAULT_CSRF_COOKIE_NAME,
+    cookie_path: str = DEFAULT_COOKIE_PATH,
+) -> None:
+    """Expire the CSRF token cookie."""
+    response.set_cookie(
+        key=csrf_cookie_name,
+        value="",
+        httponly=False,
         secure=secure,
         samesite="strict",
         path=cookie_path,

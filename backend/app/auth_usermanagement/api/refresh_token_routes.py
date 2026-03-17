@@ -40,6 +40,14 @@ async def store_refresh_cookie(
         cookie_name=settings.resolved_auth_cookie_name,
         cookie_path=settings.resolved_auth_cookie_path,
     )
+    csrf_token = api_module.generate_csrf_token()
+    api_module.set_csrf_cookie(
+        response,
+        csrf_token,
+        secure=settings.cookie_secure,
+        csrf_cookie_name=settings.resolved_auth_csrf_cookie_name,
+        cookie_path=settings.resolved_auth_cookie_path,
+    )
     log_audit_event("refresh_cookie_stored", actor_user_id=str(current_user.id))
     return {"message": "Refresh token stored"}
 
@@ -49,6 +57,7 @@ async def token_refresh(
     request: Request,
     response: Response,
     x_requested_with: Optional[str] = Header(None),
+    x_csrf_token: Optional[str] = Header(None),
     db: Session = Depends(get_db),
 ):
     """Exchange the HttpOnly refresh cookie for a new access token."""
@@ -60,6 +69,14 @@ async def token_refresh(
 
     api_module = _api_module()
     settings = api_module.get_settings()
+
+    csrf_cookie = request.cookies.get(settings.resolved_auth_csrf_cookie_name)
+    if not x_csrf_token or not csrf_cookie or x_csrf_token != csrf_cookie:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="CSRF token missing or invalid",
+        )
+
     cookie_key = request.cookies.get(settings.resolved_auth_cookie_name)
     if not cookie_key:
         raise HTTPException(
@@ -123,6 +140,12 @@ async def clear_refresh(
         response,
         secure=settings.cookie_secure,
         cookie_name=settings.resolved_auth_cookie_name,
+        cookie_path=settings.resolved_auth_cookie_path,
+    )
+    api_module.clear_csrf_cookie(
+        response,
+        secure=settings.cookie_secure,
+        csrf_cookie_name=settings.resolved_auth_csrf_cookie_name,
         cookie_path=settings.resolved_auth_cookie_path,
     )
     return {"message": "Refresh cookie cleared"}

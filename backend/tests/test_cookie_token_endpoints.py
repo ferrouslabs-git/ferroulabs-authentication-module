@@ -20,6 +20,7 @@ class _FakeSettings:
     cookie_secure = True
     resolved_auth_cookie_name = "authum_refresh_token"
     resolved_auth_cookie_path = "/auth/token"
+    resolved_auth_csrf_cookie_name = "authum_csrf_token"
 
 
 def _make_db():
@@ -97,7 +98,8 @@ def test_store_refresh_sets_httponly_cookie(monkeypatch):
 
     try:
         client = _client_with_auth(monkeypatch, SessionLocal, user_sub)
-        with patch("app.auth_usermanagement.api.store_refresh_token", return_value="opaque-key-123"):
+        with patch("app.auth_usermanagement.api.store_refresh_token", return_value="opaque-key-123"), \
+             patch("app.auth_usermanagement.api.generate_csrf_token", return_value="csrf-token-abc"):
             resp = client.post(
                 "/auth/cookie/store-refresh",
                 headers={"Authorization": "Bearer fake-token"},
@@ -106,10 +108,14 @@ def test_store_refresh_sets_httponly_cookie(monkeypatch):
         assert resp.status_code == 200
         assert resp.json()["message"] == "Refresh token stored"
 
-        set_cookie = resp.headers.get("set-cookie", "")
-        assert _FakeSettings.resolved_auth_cookie_name in set_cookie
-        assert "HttpOnly" in set_cookie
-        assert "SameSite=strict" in set_cookie.lower() or "samesite=strict" in set_cookie.lower()
+        cookies = resp.headers.get_list("set-cookie")
+        refresh_cookie = next((c for c in cookies if _FakeSettings.resolved_auth_cookie_name in c), "")
+        csrf_cookie = next((c for c in cookies if _FakeSettings.resolved_auth_csrf_cookie_name in c), "")
+
+        assert "HttpOnly" in refresh_cookie
+        assert "samesite=strict" in refresh_cookie.lower()
+        assert "HttpOnly" not in csrf_cookie  # CSRF cookie must be JS-readable
+        assert "csrf-token-abc" in csrf_cookie
     finally:
         app.dependency_overrides.pop(get_db, None)
 
@@ -148,8 +154,14 @@ def test_token_refresh_returns_access_token(monkeypatch):
         with TestClient(app) as client:
             resp = client.post(
                 "/auth/token/refresh",
-                headers={"X-Requested-With": "XMLHttpRequest"},
-                cookies={_FakeSettings.resolved_auth_cookie_name: "opaque-cookie-key"},
+                headers={
+                    "X-Requested-With": "XMLHttpRequest",
+                    "X-CSRF-Token": "valid-csrf-token",
+                },
+                cookies={
+                    _FakeSettings.resolved_auth_cookie_name: "opaque-cookie-key",
+                    _FakeSettings.resolved_auth_csrf_cookie_name: "valid-csrf-token",
+                },
             )
 
     assert resp.status_code == 200
@@ -159,11 +171,16 @@ def test_token_refresh_returns_access_token(monkeypatch):
 
 
 def test_token_refresh_rejects_missing_cookie():
-    with TestClient(app) as client:
-        resp = client.post(
-            "/auth/token/refresh",
-            headers={"X-Requested-With": "XMLHttpRequest"},
-        )
+    with patch("app.auth_usermanagement.api.get_settings", return_value=_FakeSettings()):
+        with TestClient(app) as client:
+            resp = client.post(
+                "/auth/token/refresh",
+                headers={
+                    "X-Requested-With": "XMLHttpRequest",
+                    "X-CSRF-Token": "valid-csrf",
+                },
+                cookies={_FakeSettings.resolved_auth_csrf_cookie_name: "valid-csrf"},
+            )
     assert resp.status_code == 401
 
 
@@ -174,6 +191,38 @@ def test_token_refresh_rejects_missing_csrf_header():
             cookies={_FakeSettings.resolved_auth_cookie_name: "valid-refresh-token"},
         )
     assert resp.status_code == 403
+
+
+def test_token_refresh_rejects_missing_csrf_token():
+    """X-Requested-With present but no CSRF header or cookie → 403."""
+    with patch("app.auth_usermanagement.api.get_settings", return_value=_FakeSettings()):
+        with TestClient(app) as client:
+            resp = client.post(
+                "/auth/token/refresh",
+                headers={"X-Requested-With": "XMLHttpRequest"},
+                cookies={_FakeSettings.resolved_auth_cookie_name: "valid-refresh-token"},
+            )
+    assert resp.status_code == 403
+    assert "CSRF" in resp.json()["detail"]
+
+
+def test_token_refresh_rejects_mismatched_csrf_token():
+    """CSRF header value does not match the CSRF cookie → 403."""
+    with patch("app.auth_usermanagement.api.get_settings", return_value=_FakeSettings()):
+        with TestClient(app) as client:
+            resp = client.post(
+                "/auth/token/refresh",
+                headers={
+                    "X-Requested-With": "XMLHttpRequest",
+                    "X-CSRF-Token": "wrong-token",
+                },
+                cookies={
+                    _FakeSettings.resolved_auth_cookie_name: "valid-refresh-token",
+                    _FakeSettings.resolved_auth_csrf_cookie_name: "correct-token",
+                },
+            )
+    assert resp.status_code == 403
+    assert "CSRF" in resp.json()["detail"]
 
 
 def test_token_refresh_rejects_cognito_error(monkeypatch):
@@ -187,8 +236,14 @@ def test_token_refresh_rejects_cognito_error(monkeypatch):
         with TestClient(app) as client:
             resp = client.post(
                 "/auth/token/refresh",
-                headers={"X-Requested-With": "XMLHttpRequest"},
-                cookies={_FakeSettings.resolved_auth_cookie_name: "opaque-cookie-key"},
+                headers={
+                    "X-Requested-With": "XMLHttpRequest",
+                    "X-CSRF-Token": "valid-csrf",
+                },
+                cookies={
+                    _FakeSettings.resolved_auth_cookie_name: "opaque-cookie-key",
+                    _FakeSettings.resolved_auth_csrf_cookie_name: "valid-csrf",
+                },
             )
     assert resp.status_code == 401
     assert "Refresh token expired" in resp.json()["detail"]
@@ -214,8 +269,14 @@ def test_token_refresh_rotates_cookie_when_cognito_returns_new_refresh_token():
         with TestClient(app) as client:
             resp = client.post(
                 "/auth/token/refresh",
-                headers={"X-Requested-With": "XMLHttpRequest"},
-                cookies={_FakeSettings.resolved_auth_cookie_name: "old-opaque-key"},
+                headers={
+                    "X-Requested-With": "XMLHttpRequest",
+                    "X-CSRF-Token": "valid-csrf",
+                },
+                cookies={
+                    _FakeSettings.resolved_auth_cookie_name: "old-opaque-key",
+                    _FakeSettings.resolved_auth_csrf_cookie_name: "valid-csrf",
+                },
             )
 
     assert resp.status_code == 200
@@ -282,8 +343,14 @@ def test_token_refresh_is_rate_limited():
         test_app.include_router(auth_router, prefix="/auth", tags=["auth"])
 
         with TestClient(test_app) as client:
-            headers = {"X-Requested-With": "XMLHttpRequest"}
-            cookies = {_FakeSettings.resolved_auth_cookie_name: "some-token"}
+            headers = {
+                "X-Requested-With": "XMLHttpRequest",
+                "X-CSRF-Token": "valid-csrf",
+            }
+            cookies = {
+                _FakeSettings.resolved_auth_cookie_name: "some-token",
+                _FakeSettings.resolved_auth_csrf_cookie_name: "valid-csrf",
+            }
 
             resp1 = client.post("/auth/token/refresh", headers=headers, cookies=cookies)
             assert resp1.status_code == 200

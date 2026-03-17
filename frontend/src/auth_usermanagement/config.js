@@ -15,11 +15,13 @@ function normalizeInvitePrefix(path, fallback) {
 export const isBrowser = typeof window !== "undefined";
 
 export function buildAuthConfig(env = import.meta.env) {
+  const namespace = (env.VITE_AUTH_NAMESPACE || "authum").trim() || "authum";
   return {
-    namespace: (env.VITE_AUTH_NAMESPACE || "authum").trim() || "authum",
+    namespace,
     apiBasePath: normalizePathPrefix(env.VITE_AUTH_API_BASE_PATH, "/auth"),
     callbackPath: normalizePathPrefix(env.VITE_AUTH_CALLBACK_PATH, "/callback"),
     invitePathPrefix: normalizeInvitePrefix(env.VITE_AUTH_INVITE_PATH_PREFIX, "/invite/"),
+    csrfCookieName: (env.VITE_AUTH_CSRF_COOKIE_NAME || "").trim() || `${namespace}_csrf_token`,
   };
 }
 
