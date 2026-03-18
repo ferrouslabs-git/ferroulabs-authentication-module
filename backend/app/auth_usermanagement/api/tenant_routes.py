@@ -35,6 +35,7 @@ async def create_new_tenant(
     log_audit_event(
         "tenant_created",
         actor_user_id=str(current_user.id),
+        db=db,
         tenant_id=str(tenant.id),
         tenant_name=tenant.name,
         plan=tenant.plan,

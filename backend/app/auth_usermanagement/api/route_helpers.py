@@ -69,6 +69,7 @@ async def create_invitation_response(
     log_audit_event(
         "invitation_created",
         actor_user_id=str(current_user.id),
+        db=db,
         tenant_id=str(tenant_id),
         invited_email=invite_data.email,
         invited_role=invite_data.role,

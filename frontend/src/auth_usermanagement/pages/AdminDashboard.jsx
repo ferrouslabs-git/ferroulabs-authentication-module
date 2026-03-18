@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useAuth } from "../hooks/useAuth";
 import { useRole } from "../hooks/useRole";
 import { UserList } from "../components/UserList";
+import { SessionPanel } from "../components/SessionPanel";
 import { PlatformTenantPanel } from "../components/PlatformTenantPanel";
 import { InviteUserModal } from "../components/InviteUserModal";
 import { PERMISSIONS, checkPermission } from "../constants/permissions";
@@ -260,6 +261,8 @@ export function AdminDashboard() {
             boxShadow: '0 1px 3px rgba(0,0,0,0.1)'
           }}
         />
+
+        <SessionPanel />
       </div>
 
       {/* Invite Modal */}

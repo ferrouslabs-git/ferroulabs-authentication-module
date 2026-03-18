@@ -7,17 +7,63 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 
 from ..models.user import User
-from ..schemas.session import SessionRegisterRequest, SessionRotateRequest
+from ..schemas.session import SessionListItemResponse, SessionRegisterRequest, SessionRotateRequest
 from ..security import get_current_user
 from ..services.audit_service import log_audit_event
 from ..services.session_service import (
     create_user_session,
+    list_user_sessions,
     revoke_all_user_sessions,
     revoke_user_session,
     rotate_user_session,
 )
 
 router = APIRouter()
+
+
+@router.get("/sessions", response_model=list[SessionListItemResponse])
+async def get_my_sessions(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    include_revoked: bool = False,
+    limit: int = 50,
+    x_current_session_id: Optional[str] = Header(None),
+):
+    """List current user's device sessions for visibility and self-service revocation."""
+    safe_limit = min(max(limit, 1), 200)
+
+    current_session_id: UUID | None = None
+    if x_current_session_id:
+        try:
+            current_session_id = UUID(x_current_session_id)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid X-Current-Session-ID format",
+            ) from exc
+
+    sessions = list_user_sessions(
+        db=db,
+        user_id=current_user.id,
+        include_revoked=include_revoked,
+        limit=safe_limit,
+    )
+
+    return [
+        SessionListItemResponse(
+            session_id=str(session.id),
+            user_id=str(session.user_id),
+            user_agent=session.user_agent,
+            ip_address=session.ip_address,
+            device_info=session.device_info,
+            created_at=session.created_at.isoformat(),
+            expires_at=session.expires_at.isoformat() if session.expires_at else None,
+            revoked_at=session.revoked_at.isoformat() if session.revoked_at else None,
+            is_current=(current_session_id == session.id) if current_session_id else False,
+            is_revoked=session.revoked_at is not None,
+        )
+        for session in sessions
+    ]
 
 
 @router.delete("/sessions/all")
@@ -46,6 +92,7 @@ async def revoke_all_sessions(
     log_audit_event(
         "all_sessions_revoked",
         actor_user_id=str(current_user.id),
+        db=db,
         revoked_count=revoked_count,
         kept_session_id=str(keep_session_id) if keep_session_id else None,
     )
@@ -78,6 +125,7 @@ async def register_session(
     log_audit_event(
         "session_registered",
         actor_user_id=str(current_user.id),
+        db=db,
         session_id=str(created.id),
     )
 
@@ -115,6 +163,7 @@ async def rotate_session(
     log_audit_event(
         "session_rotated",
         actor_user_id=str(current_user.id),
+        db=db,
         previous_session_id=str(session_id),
         new_session_id=str(rotated.id),
     )
@@ -141,6 +190,7 @@ async def revoke_session(
     log_audit_event(
         "session_revoked",
         actor_user_id=str(current_user.id),
+        db=db,
         session_id=str(session_id),
     )
 

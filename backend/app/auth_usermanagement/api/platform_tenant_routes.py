@@ -42,6 +42,7 @@ async def suspend_tenant_account(
     log_audit_event(
         "tenant_suspended",
         actor_user_id=str(current_user.id),
+        db=db,
         tenant_id=str(tenant.id),
         tenant_name=tenant.name,
     )
@@ -70,6 +71,7 @@ async def unsuspend_tenant_account(
     log_audit_event(
         "tenant_unsuspended",
         actor_user_id=str(current_user.id),
+        db=db,
         tenant_id=str(tenant.id),
         tenant_name=tenant.name,
     )

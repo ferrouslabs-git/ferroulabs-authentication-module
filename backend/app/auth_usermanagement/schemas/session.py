@@ -25,3 +25,16 @@ class SessionResponse(BaseModel):
     user_id: str
     revoked_at: str | None = None
     message: str
+
+
+class SessionListItemResponse(BaseModel):
+    session_id: str
+    user_id: str
+    user_agent: str | None = None
+    ip_address: str | None = None
+    device_info: str | None = None
+    created_at: str
+    expires_at: str | None = None
+    revoked_at: str | None = None
+    is_current: bool = False
+    is_revoked: bool = False

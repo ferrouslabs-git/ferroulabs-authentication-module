@@ -93,6 +93,7 @@ async def revoke_tenant_invitation(
     log_audit_event(
         "invitation_revoked",
         actor_user_id=str(current_user.id),
+        db=db,
         tenant_id=str(tenant_id),
         invitation_id=str(invitation.id),
         invited_email=invitation.email,
@@ -127,6 +128,7 @@ async def accept_invitation_token(
     log_audit_event(
         "invitation_accepted",
         actor_user_id=str(current_user.id),
+        db=db,
         tenant_id=str(membership.tenant_id),
         invitation_id=str(invitation.id),
         role=membership.role,

@@ -89,6 +89,28 @@ def test_register_and_rotate_session_endpoints(monkeypatch):
                 },
             )
             assert rotate_fail.status_code == 404
+
+            list_resp = client.get(
+                "/auth/sessions",
+                headers={
+                    "Authorization": "Bearer fake-token",
+                    "X-Current-Session-ID": rotate_payload["session_id"],
+                },
+            )
+            assert list_resp.status_code == 200
+            sessions = list_resp.json()
+            assert len(sessions) == 1
+            assert sessions[0]["session_id"] == rotate_payload["session_id"]
+            assert sessions[0]["is_current"] is True
+
+            bad_header = client.get(
+                "/auth/sessions",
+                headers={
+                    "Authorization": "Bearer fake-token",
+                    "X-Current-Session-ID": "not-a-uuid",
+                },
+            )
+            assert bad_header.status_code == 400
     finally:
         app.dependency_overrides.clear()
         Base.metadata.drop_all(engine)

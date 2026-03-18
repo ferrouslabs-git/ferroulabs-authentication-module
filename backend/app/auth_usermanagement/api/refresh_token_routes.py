@@ -48,7 +48,7 @@ async def store_refresh_cookie(
         csrf_cookie_name=settings.resolved_auth_csrf_cookie_name,
         cookie_path=settings.resolved_auth_cookie_path,
     )
-    log_audit_event("refresh_cookie_stored", actor_user_id=str(current_user.id))
+    log_audit_event("refresh_cookie_stored", actor_user_id=str(current_user.id), db=db)
     return {"message": "Refresh token stored"}
 
 

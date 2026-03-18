@@ -116,6 +116,25 @@ export async function revokeAllSessions(token, currentSessionId) {
   return res.data;
 }
 
+export async function listSessions(token, currentSessionId = null, includeRevoked = false) {
+  const headers = authHeaders(token);
+  if (currentSessionId) {
+    headers["X-Current-Session-ID"] = currentSessionId;
+  }
+  const res = await api.get("/sessions", {
+    headers,
+    params: { include_revoked: includeRevoked },
+  });
+  return res.data;
+}
+
+export async function revokeSession(token, sessionId) {
+  const res = await api.delete(`/sessions/${sessionId}`, {
+    headers: authHeaders(token),
+  });
+  return res.data;
+}
+
 export async function storeRefreshCookie(token, refreshToken) {
   const res = await api.post(
     "/cookie/store-refresh",

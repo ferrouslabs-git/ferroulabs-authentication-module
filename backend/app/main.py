@@ -4,6 +4,7 @@ FastAPI app entrypoint for auth module test app.
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.config import get_host_settings
 from app.auth_usermanagement.api import router as auth_router
 from app.auth_usermanagement.config import get_settings
 from app.auth_usermanagement.security.rate_limit_middleware import RateLimitMiddleware
@@ -12,11 +13,12 @@ from app.auth_usermanagement.security.tenant_middleware import TenantContextMidd
 
 app = FastAPI(title="Auth Sandbox Test")
 settings = get_settings()
+host_settings = get_host_settings()
 
-# CORS for local frontend apps.
+# CORS is host-owned and environment-configurable.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:5173"],
+    allow_origins=host_settings.resolved_cors_allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

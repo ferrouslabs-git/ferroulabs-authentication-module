@@ -5,6 +5,7 @@ from uuid import uuid4
 
 from app.auth_usermanagement.services.session_service import (
     create_user_session,
+    list_user_sessions,
     revoke_all_user_sessions,
     revoke_user_session,
     rotate_user_session,
@@ -19,6 +20,12 @@ class _FakeQuery:
         self._all = all_results or []
 
     def filter(self, *args, **kwargs):
+        return self
+
+    def order_by(self, *args, **kwargs):
+        return self
+
+    def limit(self, *args, **kwargs):
         return self
 
     def first(self):
@@ -194,3 +201,13 @@ def test_revoke_all_user_sessions_revokes_each_active_session():
     assert isinstance(s1.revoked_at, datetime)
     assert isinstance(s2.revoked_at, datetime)
     assert db.commits == 1
+
+
+def test_list_user_sessions_returns_newest_first_limited_results():
+    s1 = SimpleNamespace(id=uuid4(), user_id=uuid4(), created_at=utc_now())
+    s2 = SimpleNamespace(id=uuid4(), user_id=uuid4(), created_at=utc_now())
+    db = _FakeSession(all_results=[s1, s2])
+
+    result = list_user_sessions(db, s1.user_id, include_revoked=True, limit=25)
+
+    assert result == [s1, s2]

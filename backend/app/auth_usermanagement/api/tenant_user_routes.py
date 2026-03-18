@@ -59,6 +59,7 @@ async def patch_tenant_user_role(
     log_audit_event(
         "tenant_user_role_updated",
         actor_user_id=str(ctx.user_id),
+        db=db,
         tenant_id=str(tenant_id),
         target_user_id=str(user_id),
         new_role=payload.role,
@@ -92,6 +93,7 @@ async def delete_tenant_user(
     log_audit_event(
         "tenant_user_removed",
         actor_user_id=str(ctx.user_id),
+        db=db,
         tenant_id=str(tenant_id),
         target_user_id=str(user_id),
         resulting_status=membership.status,

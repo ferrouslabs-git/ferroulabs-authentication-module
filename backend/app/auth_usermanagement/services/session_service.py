@@ -42,6 +42,20 @@ def create_user_session(
     return auth_session
 
 
+def list_user_sessions(
+    db: Session,
+    user_id: UUID,
+    *,
+    include_revoked: bool = False,
+    limit: int = 50,
+) -> list[AuthSession]:
+    """Return most recent sessions for a user, newest first."""
+    query = db.query(AuthSession).filter(AuthSession.user_id == user_id)
+    if not include_revoked:
+        query = query.filter(AuthSession.revoked_at.is_(None))
+    return query.order_by(AuthSession.created_at.desc()).limit(limit).all()
+
+
 def validate_refresh_session(
     db: Session,
     user_id: UUID,

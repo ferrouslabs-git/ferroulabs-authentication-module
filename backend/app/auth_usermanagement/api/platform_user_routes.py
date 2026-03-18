@@ -51,6 +51,7 @@ async def suspend_user_account(
     log_audit_event(
         "user_suspended",
         actor_user_id=str(current_user.id),
+        db=db,
         target_user_id=str(user_id),
         target_email=suspended_user.email,
     )
@@ -82,6 +83,7 @@ async def unsuspend_user_account(
     log_audit_event(
         "user_unsuspended",
         actor_user_id=str(current_user.id),
+        db=db,
         target_user_id=str(user_id),
         target_email=unsuspended_user.email,
     )
@@ -113,6 +115,7 @@ async def promote_platform_admin_account(
     log_audit_event(
         "user_promoted_to_platform_admin",
         actor_user_id=str(current_user.id),
+        db=db,
         target_user_id=str(user_id),
         target_email=promoted_user.email,
     )
@@ -149,6 +152,7 @@ async def demote_platform_admin_account(
     log_audit_event(
         "user_demoted_from_platform_admin",
         actor_user_id=str(current_user.id),
+        db=db,
         target_user_id=str(user_id),
         target_email=demoted_user.email,
     )

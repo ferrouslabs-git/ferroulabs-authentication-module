@@ -11,6 +11,7 @@ export { TenantSwitcher } from "./components/TenantSwitcher";
 export { RoleSelector } from "./components/RoleSelector";
 export { InviteUserModal } from "./components/InviteUserModal";
 export { UserList } from "./components/UserList";
+export { SessionPanel } from "./components/SessionPanel";
 export { AcceptInvitation } from "./components/AcceptInvitation";
 export { ToastProvider } from "./components/Toast";
 export { AdminDashboard } from "./pages";
