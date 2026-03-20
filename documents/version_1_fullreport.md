@@ -443,6 +443,9 @@ From backend/app/auth_usermanagement/config.py:
 From backend/app/database.py:
 - DATABASE_URL
 
+From backend/app/config.py:
+- CORS_ALLOWED_ORIGINS
+
 ### 8.2 Frontend variables consumed
 
 From frontend/src/auth_usermanagement/config.js and services/cognitoClient.js:
@@ -599,8 +602,8 @@ Observed posture:
 
 ## 13. Current Caveats and Risks Seen in Code
 
-1) CORS in backend/app/main.py is hardcoded to localhost origins.
-- For reusable host integration, this should move to configuration.
+1) CORS is now host-configured via CORS_ALLOWED_ORIGINS.
+- Risk is operational misconfiguration (missing/wrong origins) across environments, not hardcoding.
 
 2) tenant_middleware route skip list is explicit and broad.
 - Works, but route additions must stay aligned with dependency enforcement.
