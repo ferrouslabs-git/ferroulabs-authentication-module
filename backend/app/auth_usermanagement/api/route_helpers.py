@@ -110,6 +110,19 @@ async def create_invitation_response(
         email_provider=email_result.provider,
     )
 
+    if not email_result.sent:
+        log_audit_event(
+            "email_send_failed",
+            actor_user_id=str(current_user.id),
+            db=db,
+            tenant_id=str(tenant_id),
+            target_type="invitation",
+            target_id=str(invitation.id),
+            to_email=invite_data.email,
+            provider=email_result.provider,
+            error_detail=email_result.detail,
+        )
+
     message = "Invitation created successfully"
     if not email_result.sent:
         message = f"Invitation created; email not sent ({email_result.detail})"

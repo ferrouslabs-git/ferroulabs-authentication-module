@@ -29,10 +29,11 @@ STRUCTURAL_PERMISSIONS = frozenset({
 
 
 def _load_config() -> dict:
+    # __file__ → alembic/versions/ → alembic/ → backend/
     config_path = os.getenv(
         "AUTH_CONFIG_PATH",
         os.path.join(
-            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
             "app", "auth_usermanagement", "auth_config.yaml",
         ),
     )

@@ -5,10 +5,15 @@ Each tenant represents a client/organization
 from sqlalchemy import Column, String, DateTime
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
-from datetime import datetime
+from datetime import datetime, UTC
 from uuid import uuid4
 
 from ..database import Base
+
+
+def utc_now() -> datetime:
+    """Return naive UTC datetime compatible with existing DB DateTime columns."""
+    return datetime.now(UTC).replace(tzinfo=None)
 
 
 class Tenant(Base):
@@ -23,8 +28,8 @@ class Tenant(Base):
     plan = Column(String(50), default="free")  # free, pro, enterprise
     status = Column(String(20), default="active")  # active, suspended
     
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime, default=utc_now, nullable=False)
+    updated_at = Column(DateTime, default=utc_now, onupdate=utc_now, nullable=False)
     
     # Relationships
     memberships = relationship(

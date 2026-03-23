@@ -1,10 +1,11 @@
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from ..database import get_db
 
+from ..models.audit_event import AuditEvent
 from ..models.user import User
 from ..schemas.tenant import PlatformTenantResponse, TenantStatusResponse
 from ..security import get_current_user
@@ -81,3 +82,38 @@ async def unsuspend_tenant_account(
         status=tenant.status,
         message="Tenant unsuspended successfully",
     )
+
+
+@router.get("/platform/invitations/failed")
+async def get_failed_invitation_emails(
+    limit: int = Query(50, ge=1, le=200),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """List recent invitation email failures (platform admin only).
+
+    Returns audit events where ``action == 'email_send_failed'``,
+    ordered by most recent first.
+    """
+    ensure_platform_admin(current_user, "view failed invitation emails")
+
+    events = (
+        db.query(AuditEvent)
+        .filter(AuditEvent.action == "email_send_failed")
+        .order_by(AuditEvent.timestamp.desc())
+        .limit(limit)
+        .all()
+    )
+
+    return [
+        {
+            "id": str(e.id),
+            "timestamp": e.timestamp.isoformat() if e.timestamp else None,
+            "tenant_id": str(e.tenant_id) if e.tenant_id else None,
+            "invitation_id": (e.metadata_json or {}).get("target_id"),
+            "to_email": (e.metadata_json or {}).get("to_email"),
+            "provider": (e.metadata_json or {}).get("provider"),
+            "error_detail": (e.metadata_json or {}).get("error_detail"),
+        }
+        for e in events
+    ]

@@ -1,99 +1,59 @@
-# Auth Module Portability Sandbox
+# auth_usermanagement
 
-This is a minimal standalone app to test that the `auth_usermanagement` module works outside of TrustOS.
+Reusable multi-tenant auth and user management module for FastAPI + React applications.
 
-## Purpose
+## What It Does
 
-Proves the auth module is truly portable by running it in a fresh React + FastAPI environment with minimal integration code.
+- AWS Cognito PKCE authentication with JWT verification
+- Multi-tenant RBAC with three-layer scopes (platform / account / space)
+- Invitation lifecycle with hashed tokens and SES email delivery
+- Cookie-based refresh tokens with CSRF protection
+- Session management with device tracking
+- PostgreSQL row-level security for tenant isolation
+- Distributed rate limiting on sensitive endpoints
+- Audit event logging for all security-relevant actions
+- Automated cleanup of expired tokens, invitations, and stale data
 
-## Setup
-
-### Backend
+## Quick Start
 
 ```bash
+# Backend
 cd backend
 pip install -r requirements.txt
-```
+uvicorn app.main:app --reload --port 8001
 
-### Frontend
-
-```bash
+# Frontend
 cd frontend
 npm install
-```
-
-## Run
-
-### Start Backend (Port 8001)
-
-```bash
-cd backend
-python main.py
-```
-
-Or:
-
-```bash
-cd backend
-uvicorn main:app --reload --port 8001
-```
-
-### Start Frontend (Port 5173)
-
-```bash
-cd frontend
 npm run dev
 ```
 
-## Test
+Or with Docker:
 
-1. Open http://localhost:5173
-2. Click "Login with Cognito"
-3. Redirects to Cognito Hosted UI
-4. After login, should see:
-   - User email displayed
-   - Tenant switcher (if you have multiple tenants)
-   - User list for current tenant
-   - Invite button (if admin/owner)
+```bash
+docker compose up --build
+```
 
-## What's Being Tested
+## Documentation
 
-✅ Auth module works outside TrustOS  
-✅ Cognito integration (Hosted UI flow)  
-✅ Backend JWT verification  
-✅ Tenant switching  
-✅ User management (list, invite, role changes)  
-✅ Role-based permissions  
-✅ Middleware (tenant context, rate limiting, security headers)  
+All detailed documentation lives in [`documents/`](documents/):
 
-## Files Created
+| Document | Purpose |
+|----------|---------|
+| [Setup Guide](documents/setup_guide.md) | Step-by-step integration into a new host project |
+| [Agent Reference](documents/agent_reference.md) | AI agent / developer technical reference |
+| [Cognito & SSO Guide](documents/cognito_and_sso_guide.md) | AWS Cognito setup and SSO federation planning |
+| [Version 1 Report](documents/version_1_fullreport.md) | Full system documentation, security model, and changelog |
 
-**Backend:**
-- `main.py` - Minimal FastAPI app (registers auth router + middleware)
-- `database.py` - Database connection (reuses TrustOS database)
-- `requirements.txt` - Python dependencies
-- `.env` - Environment variables (copied from TrustOS)
+## Running Tests
 
-**Frontend:**
-- `src/App.jsx` - Minimal React app using auth module
-- `src/main.jsx` - Entry point
-- `index.html` - HTML template
-- `package.json` - Node dependencies
-- `vite.config.js` - Vite configuration
-- `.env` - Frontend environment variables
+```bash
+# Backend (SQLite, fast)
+cd backend && pytest -q tests
 
-**Module (copied from TrustOS):**
-- `backend/app/auth_usermanagement/` - Backend auth module (single source of truth)
-- `frontend/src/auth_usermanagement/` - Frontend auth module
+# PostgreSQL RLS verification
+RUN_POSTGRES_RLS_TESTS=1 DATABASE_URL=postgresql://... pytest -q tests/test_row_level_security.py
 
-## Success Criteria
-
-If login works and you can see the user list, the module is portable! ✅
-
-## Notes
-
-- Backend runs on port **8001** (not 8000) to avoid conflict with TrustOS
-- Frontend runs on port **5173** (Vite default)
-- Uses same database as TrustOS (no migrations needed)
-- Uses same Cognito User Pool as TrustOS
-- Frontend requires `VITE_COGNITO_DOMAIN` and `VITE_COGNITO_CLIENT_ID`; `VITE_COGNITO_REDIRECT_URI` defaults to `<origin>/callback`
+# Frontend
+cd frontend && npx vitest run
+```

@@ -134,3 +134,41 @@ def test_new_users_are_active_by_default(db_session):
 
     assert user.is_active is True
     assert user.suspended_at is None
+
+
+def test_suspend_user_calls_cognito_global_sign_out(db_session, monkeypatch):
+    """Verify that suspending a user triggers a Cognito global sign-out."""
+    user = User(
+        cognito_sub="sign-out-sub",
+        email="signout@example.com",
+        name="Sign Out User",
+        is_active=True,
+    )
+    db_session.add(user)
+    db_session.commit()
+    db_session.refresh(user)
+
+    calls = []
+
+    class FakeCognitoClient:
+        def admin_user_global_sign_out(self, **kwargs):
+            calls.append(kwargs)
+
+    monkeypatch.setenv("COGNITO_USER_POOL_ID", "eu-west-1_TestPool")
+    # Clear the lru_cache so Settings picks up the new env var
+    from app.auth_usermanagement.config import get_settings
+    get_settings.cache_clear()
+
+    monkeypatch.setattr(
+        "app.auth_usermanagement.services.user_service.boto3",
+        type("FakeBoto3", (), {"client": staticmethod(lambda *a, **kw: FakeCognitoClient())})(),
+    )
+
+    suspend_user(user.id, db_session)
+
+    assert len(calls) == 1
+    assert calls[0]["UserPoolId"] == "eu-west-1_TestPool"
+    assert calls[0]["Username"] == "sign-out-sub"
+
+    # Restore cached settings
+    get_settings.cache_clear()

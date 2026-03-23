@@ -1,4 +1,4 @@
-import { AUTH_CONFIG, LEGACY_STORAGE_KEYS, STORAGE_KEYS, isBrowser } from "../config";
+import { AUTH_CONFIG, STORAGE_KEYS, isBrowser } from "../config";
 
 const cognitoDomain = import.meta.env.VITE_COGNITO_DOMAIN;
 const clientId = import.meta.env.VITE_COGNITO_CLIENT_ID;
@@ -124,9 +124,7 @@ export function getAuthErrorFromUrl() {
 export async function exchangeAuthCodeForTokens(code) {
   assertAuthConfig();
 
-  const codeVerifier =
-    sessionStorage.getItem(STORAGE_KEYS.pkceCodeVerifier)
-    || sessionStorage.getItem(LEGACY_STORAGE_KEYS.pkceCodeVerifier);
+  const codeVerifier = sessionStorage.getItem(STORAGE_KEYS.pkceCodeVerifier);
   const redirectUri = getRedirectUri();
   const body = new URLSearchParams({
     grant_type: "authorization_code",
@@ -151,7 +149,6 @@ export async function exchangeAuthCodeForTokens(code) {
   }
 
   sessionStorage.removeItem(STORAGE_KEYS.pkceCodeVerifier);
-  sessionStorage.removeItem(LEGACY_STORAGE_KEYS.pkceCodeVerifier);
   return result;
 }
 

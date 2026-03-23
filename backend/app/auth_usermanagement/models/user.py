@@ -4,10 +4,15 @@ User model - represents individuals authenticated via Cognito
 from sqlalchemy import Column, String, Boolean, DateTime
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
-from datetime import datetime
+from datetime import datetime, UTC
 from uuid import uuid4
 
 from ..database import Base
+
+
+def utc_now() -> datetime:
+    """Return naive UTC datetime compatible with existing DB DateTime columns."""
+    return datetime.now(UTC).replace(tzinfo=None)
 
 
 class User(Base):
@@ -25,8 +30,8 @@ class User(Base):
     is_active = Column(Boolean, default=True, nullable=False)
     suspended_at = Column(DateTime, nullable=True)
     
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime, default=utc_now, nullable=False)
+    updated_at = Column(DateTime, default=utc_now, onupdate=utc_now, nullable=False)
     
     # Relationships
     memberships = relationship("Membership", back_populates="user", cascade="all, delete-orphan",

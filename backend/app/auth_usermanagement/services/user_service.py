@@ -1,13 +1,20 @@
 """
 User service - handles user sync and lookup operations
 """
+import logging
+
+import boto3
+from botocore.exceptions import ClientError
 from sqlalchemy.orm import Session
 from typing import Optional
 from uuid import UUID
 from datetime import datetime, UTC
 
+from ..config import get_settings
 from ..models.user import User
 from ..schemas.token import TokenPayload
+
+logger = logging.getLogger(__name__)
 
 
 def utc_now() -> datetime:
@@ -115,6 +122,10 @@ def get_user_by_email(email: str, db: Session) -> Optional[User]:
 def suspend_user(user_id: UUID, db: Session) -> User:
     """
     Suspend a user account.
+
+    Also calls Cognito ``AdminUserGlobalSignOut`` to invalidate all
+    outstanding refresh tokens so the user cannot silently re-acquire
+    new access tokens after suspension.
     
     Args:
         user_id: User ID to suspend
@@ -134,7 +145,34 @@ def suspend_user(user_id: UUID, db: Session) -> User:
     user.suspended_at = utc_now()
     db.commit()
     db.refresh(user)
+
+    _cognito_global_sign_out(user.cognito_sub)
+
     return user
+
+
+def _cognito_global_sign_out(cognito_sub: str) -> None:
+    """Best-effort Cognito global sign-out. Never raises."""
+    settings = get_settings()
+    if not settings.cognito_user_pool_id:
+        logger.debug("Cognito user pool not configured; skipping global sign-out")
+        return
+
+    try:
+        client = boto3.client("cognito-idp", region_name=settings.cognito_region)
+        client.admin_user_global_sign_out(
+            UserPoolId=settings.cognito_user_pool_id,
+            Username=cognito_sub,
+        )
+        logger.info("Cognito global sign-out succeeded for %s", cognito_sub)
+    except ClientError as exc:
+        logger.warning(
+            "Cognito global sign-out failed for %s: %s",
+            cognito_sub,
+            exc.response["Error"]["Message"],
+        )
+    except Exception:
+        logger.exception("Unexpected error during Cognito global sign-out")
 
 
 def unsuspend_user(user_id: UUID, db: Session) -> User:

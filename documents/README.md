@@ -1,33 +1,21 @@
 # Documentation Index
 
-Last updated: 2026-03-23 — v3.0 (three-layer scope architecture)
+Last updated: 2026-03-23
 
 ---
 
-## Quick Start
-
-| Goal | Document |
-|------|----------|
-| **Integrate this module into a new project** | [setup_guide.md](setup_guide.md) |
-| **AI agent / LLM context for coding** | [agent_reference.md](agent_reference.md) |
-| **Cognito setup + SSO federation** | [cognito_and_sso_guide.md](cognito_and_sso_guide.md) |
-
----
-
-## Document Catalog
-
-### Core Documentation (v3.0)
+## Documents
 
 | Document | Purpose | Audience |
 |----------|---------|----------|
-| [setup_guide.md](setup_guide.md) | Step-by-step host integration guide — DB wiring, middleware, routes, env vars, migrations, frontend | Developers |
-| [agent_reference.md](agent_reference.md) | Complete system reference — file tree, data model, permission system, API endpoints, service signatures, invariants | AI agents, developers |
+| [setup_guide.md](setup_guide.md) | Step-by-step integration into a new host project (DB wiring, middleware, env vars, migrations, frontend, Docker, cleanup) | Developers |
+| [agent_reference.md](agent_reference.md) | AI agent / developer technical reference — file tree, data model, permission system, API endpoints, service signatures, invariants | AI agents, developers |
+| [cognito_and_sso_guide.md](cognito_and_sso_guide.md) | AWS Cognito base setup, SSO provider configuration (Google / Azure), federation wiring, multi-tenant SSO planning | Developers, ops |
+| [version_1_fullreport.md](version_1_fullreport.md) | Complete system report — architecture, security model, data model, test coverage, change history | All |
 
-### Setup & Configuration
+## Archived
 
-| Document | Purpose |
-|----------|---------|
-| [cognito_and_sso_guide.md](cognito_and_sso_guide.md) | Cognito base setup, SSO provider config (Google/Azure), federation wiring, multi-tenant SSO planning |
+Older planning and implementation docs are in [old_docs/](old_docs/).
 
 ### Archive
 

@@ -8,7 +8,7 @@ import {
   logoutFromCognito,
   decodeJwt,
 } from "../services/cognitoClient";
-import { LEGACY_STORAGE_KEYS, STORAGE_KEYS, isBrowser, isSafeInvitePath } from "../config";
+import { STORAGE_KEYS, isBrowser, isSafeInvitePath } from "../config";
 
 export const AuthContext = createContext(null);
 
@@ -46,7 +46,7 @@ export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [tenants, setTenants] = useState([]);
   const [tenantId, setTenantId] = useState(
-    readStorage(TENANT_KEY) || readStorage(LEGACY_STORAGE_KEYS.tenantId),
+    readStorage(TENANT_KEY),
   );
   const [isLoading, setIsLoading] = useState(true);
   const [authError, setAuthError] = useState("");
@@ -58,17 +58,7 @@ export function AuthProvider({ children }) {
   const refreshTimerRef = useRef(null);
   const skipNextBootstrapRefreshRef = useRef(false);
 
-  // Migrate legacy key names once and clear stale legacy token keys.
-  useEffect(() => {
-    const legacyTenant = readStorage(LEGACY_STORAGE_KEYS.tenantId);
-    if (!readStorage(TENANT_KEY) && legacyTenant) {
-      writeStorage(TENANT_KEY, legacyTenant);
-    }
-    removeStorage(LEGACY_STORAGE_KEYS.tenantId);
-    removeStorage(LEGACY_STORAGE_KEYS.accessToken);
-    removeStorage(LEGACY_STORAGE_KEYS.idToken);
-    removeStorage(LEGACY_STORAGE_KEYS.refreshToken);
-  }, []);
+
 
   useEffect(() => {
     async function bootstrap() {
@@ -188,17 +178,15 @@ export function AuthProvider({ children }) {
         setAuthError("");
 
         // Redirect only to safe invitation paths and clear stale values.
-        const redirectPath = readStorage(POST_LOGIN_REDIRECT_KEY) || readStorage(LEGACY_STORAGE_KEYS.postLoginRedirect);
+        const redirectPath = readStorage(POST_LOGIN_REDIRECT_KEY);
         const isSafeInviteRedirect = isSafeInvitePath(redirectPath);
         if (isSafeInviteRedirect && redirectPath !== window.location.pathname) {
           removeStorage(POST_LOGIN_REDIRECT_KEY);
-          removeStorage(LEGACY_STORAGE_KEYS.postLoginRedirect);
           window.location.href = redirectPath;
           return;
         }
         if (redirectPath && !isSafeInviteRedirect) {
           removeStorage(POST_LOGIN_REDIRECT_KEY);
-          removeStorage(LEGACY_STORAGE_KEYS.postLoginRedirect);
         }
       } catch (error) {
         const authDetail = error?.response?.data?.detail;
@@ -314,15 +302,10 @@ export function AuthProvider({ children }) {
       // Continue local cleanup.
     }
 
-    // Defensively clear any legacy localStorage keys.
     // Prevent an immediate bootstrap refresh attempt after explicit logout.
     skipNextBootstrapRefreshRef.current = true;
-    removeStorage(LEGACY_STORAGE_KEYS.accessToken);
-    removeStorage(LEGACY_STORAGE_KEYS.idToken);
-    removeStorage(LEGACY_STORAGE_KEYS.refreshToken);
     removeStorage(TENANT_KEY);
     removeStorage(POST_LOGIN_REDIRECT_KEY);
-    removeStorage(LEGACY_STORAGE_KEYS.postLoginRedirect);
     setToken(null);
     setIdToken(null);
     setTenantId(null);

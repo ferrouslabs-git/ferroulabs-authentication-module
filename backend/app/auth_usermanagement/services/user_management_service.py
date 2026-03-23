@@ -87,10 +87,16 @@ def update_user_role(
 
     if not actor_is_platform_admin:
         actor_effective = actor_role or ""
+
+        # Only owners (or platform admins, handled above) can assign owner roles.
+        if new_role in {"owner", "account_owner"}:
+            if actor_effective not in ("owner", "account_owner"):
+                raise ValueError("Only account owners can assign the owner role")
+
         if actor_effective in ("admin", "account_admin"):
             if current_role in ("owner", "account_owner"):
                 raise ValueError("Admins cannot modify owner roles")
-            if new_role in {"owner", "admin", "account_owner", "account_admin"}:
+            if new_role in {"admin", "account_admin"}:
                 raise ValueError("Admins can only assign member or viewer roles")
 
     # Prevent removing the last owner / account_owner.

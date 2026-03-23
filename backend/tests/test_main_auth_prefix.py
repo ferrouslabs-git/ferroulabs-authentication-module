@@ -24,3 +24,24 @@ def test_main_uses_configured_auth_prefix(monkeypatch):
             assert legacy.status_code == 404
     finally:
         auth_config.get_settings.cache_clear()
+
+
+def test_v1_versioned_prefix_works(monkeypatch):
+    """Verify that host apps can set AUTH_API_PREFIX=/v1/auth for versioned routes."""
+    monkeypatch.setenv("AUTH_API_PREFIX", "/v1/auth")
+
+    import app.auth_usermanagement.config as auth_config
+    auth_config.get_settings.cache_clear()
+
+    import app.main as main_module
+    main_module = importlib.reload(main_module)
+
+    try:
+        with TestClient(main_module.app) as client:
+            configured = client.get("/v1/auth/debug-token")
+            assert configured.status_code == 401
+
+            old = client.get("/auth/debug-token")
+            assert old.status_code == 404
+    finally:
+        auth_config.get_settings.cache_clear()

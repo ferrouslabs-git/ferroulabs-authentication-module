@@ -37,20 +37,6 @@ export const STORAGE_KEYS = {
   pkceCodeVerifier: getStorageKey("pkce_code_verifier"),
 };
 
-// Intentionally hardcoded: these are the old "trustos_*" localStorage keys
-// used before the configurable namespace was introduced.  Kept only so that
-// AuthProvider / cognitoClient can clean up leftover browser storage for
-// users who authenticated under the old key scheme.  Safe to delete once
-// all active browser sessions have rotated (target: 2026-06-01).
-export const LEGACY_STORAGE_KEYS = {
-  tenantId: "trustos_tenant_id",
-  postLoginRedirect: "trustos_post_login_redirect",
-  accessToken: "trustos_access_token",
-  idToken: "trustos_id_token",
-  refreshToken: "trustos_refresh_token",
-  pkceCodeVerifier: "trustos_pkce_code_verifier",
-};
-
 export function isSafeInvitePath(path, config = AUTH_CONFIG) {
   if (typeof path !== "string") {
     return false;

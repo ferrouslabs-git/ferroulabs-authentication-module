@@ -4,10 +4,15 @@ Membership model - links Users to scopes (platform / account / space) with roles
 from sqlalchemy import Column, String, DateTime, ForeignKey, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
-from datetime import datetime
+from datetime import datetime, UTC
 from uuid import uuid4
 
 from ..database import Base
+
+
+def utc_now() -> datetime:
+    """Return naive UTC datetime compatible with existing DB DateTime columns."""
+    return datetime.now(UTC).replace(tzinfo=None)
 
 
 class Membership(Base):
@@ -24,7 +29,7 @@ class Membership(Base):
     scope_type = Column(String(20), nullable=False)      # platform | account | space
     scope_id = Column(UUID(as_uuid=True), nullable=False, index=True)
     status = Column(String(20), default="active")       # active | removed | suspended
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime, default=utc_now, nullable=False)
     granted_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"),
                         nullable=True)
 

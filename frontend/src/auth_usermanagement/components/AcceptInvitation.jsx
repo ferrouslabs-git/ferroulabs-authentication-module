@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import { getInvitationDetails, acceptInvitation } from '../services/authApi';
 import { LoginForm } from './LoginForm';
-import { LEGACY_STORAGE_KEYS, STORAGE_KEYS, isBrowser } from '../config';
+import { STORAGE_KEYS, isBrowser } from '../config';
 
 export function AcceptInvitation() {
   const { token } = useParams();
@@ -42,7 +42,6 @@ export function AcceptInvitation() {
     }
     if (!user && invitation && !invitation.is_accepted && !invitation.is_expired) {
       window.localStorage.setItem(STORAGE_KEYS.postLoginRedirect, window.location.pathname);
-      window.localStorage.removeItem(LEGACY_STORAGE_KEYS.postLoginRedirect);
     }
   }, [user, invitation]);
 

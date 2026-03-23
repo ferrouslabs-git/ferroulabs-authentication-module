@@ -8,12 +8,13 @@
 ## 1. System Identity
 
 - **Module**: `auth_usermanagement` — reusable FastAPI auth + multi-tenancy + RBAC module
-- **Version**: 3.0 (three-layer scope: platform / account / space)
+- **Version**: 1.0 (three-layer scope architecture: platform / account / space)
 - **Auth Provider**: AWS Cognito (PKCE OAuth2 + JWT)
 - **Database**: PostgreSQL (production), SQLite (tests)
 - **ORM**: SQLAlchemy 2.0
 - **Permission Model**: YAML-driven roles → resolved permission strings
 - **Frontend**: React (hooks + context), Vite bundler
+- **Tests**: 261 backend (SQLite) + 56 frontend
 
 ---
 
@@ -79,6 +80,7 @@ backend/
 │           ├── __init__.py
 │           ├── audit_service.py
 │           ├── auth_config_loader.py    # YAML parser, AuthConfig class
+│           ├── cleanup_service.py       # Purge expired tokens, invitations, rate-limit hits, audit events
 │           ├── cookie_token_service.py
 │           ├── email_service.py         # SES invitation emails
 │           ├── invitation_service.py
@@ -94,6 +96,8 @@ backend/
 ├── tests/
 │   ├── conftest.py                      # SQLite in-memory fixtures
 │   ├── test_audit_service.py
+│   ├── test_cleanup_service.py          # 9 tests for expired data purging
+│   ├── test_config_loader.py
 │   ├── test_context_models.py
 │   ├── test_cookie_token_endpoints.py
 │   ├── test_cookie_token_service.py
@@ -101,14 +105,20 @@ backend/
 │   ├── test_db_runtime_guardrails.py
 │   ├── test_guards.py
 │   ├── test_invitation_service.py
+│   ├── test_jwks_cache_ttl.py           # JWKS TTL cache and key rotation tests
 │   ├── test_main_auth_prefix.py
+│   ├── test_membership_backfill.py
+│   ├── test_permission_guards.py
 │   ├── test_platform_tenant_api.py
 │   ├── test_rate_limit_middleware.py
 │   ├── test_rate_limiter_service.py
 │   ├── test_refresh_token_store_service.py
 │   ├── test_row_level_security.py       # PostgreSQL-only (RUN_POSTGRES_RLS_TESTS=1)
+│   ├── test_scope_context.py
+│   ├── test_scoped_invitations.py
 │   ├── test_session_api.py
 │   ├── test_session_service.py
+│   ├── test_space_service.py
 │   ├── test_tenant_isolation_api.py
 │   ├── test_tenant_middleware.py
 │   ├── test_tenant_service.py
@@ -148,8 +158,8 @@ frontend/
 | `spaces` | `id` (UUID) | `name`, `account_id`, `status` | ← memberships |
 | `role_definitions` | `id` (UUID) | `role_name`, `layer`, `display_name`, `permissions` (JSON) | — |
 | `permission_grants` | `id` (UUID) | `membership_id`, `permission` | → membership |
-| `audit_events` | `id` (UUID) | `event`, `actor_user_id`, `tenant_id`, `details` (JSON), `created_at` | — |
-| `rate_limit_hits` | `id` (UUID) | `key`, `hit_count`, `window_end` | — |
+| `audit_events` | `id` (UUID) | `action`, `actor_user_id`, `tenant_id`, `target_type`, `target_id`, `metadata_json`, `ip_address`, `created_at` | — |
+| `rate_limit_hits` | `id` (UUID) | `key`, `hit_at` | — |
 
 ### Key Constraints
 
@@ -368,6 +378,14 @@ create_rate_limiter(db_factory=None) -> RateLimiter
 # RateLimiter.close() -> None
 ```
 
+### cleanup_service.py
+
+```python
+run_cleanup(db, invitation_days=30, rate_limit_hours=24, audit_retention_days=365) -> dict
+# Returns: {"refresh_tokens": N, "invitations": N, "rate_limit_hits": N, "audit_events": N}
+# Set audit_retention_days=0 to skip audit purging
+```
+
 ### email_service.py
 
 ```python
@@ -438,6 +456,12 @@ async def remove_user(
 9. **Membership status filtering**: Queries must filter `status="active"` to exclude removed/suspended members.
 
 10. **Last owner protection**: `remove_user_from_tenant` and `update_user_role` prevent removing or demoting the last `account_owner`.
+
+11. **Owner role restriction**: `update_membership_role()` rejects attempts to assign `account_owner` role. Ownership must use a dedicated transfer flow.
+
+12. **Cognito sign-out on suspension**: `suspend_user()` calls `AdminUserGlobalSignOut` to revoke all Cognito refresh tokens immediately.
+
+13. **JWKS cache TTL**: 1-hour TTL with thread-safe double-check locking. Single-retry key rotation on `kid` miss prevents cache-busting DoS.
 
 ---
 

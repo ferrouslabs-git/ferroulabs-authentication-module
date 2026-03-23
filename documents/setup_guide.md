@@ -481,6 +481,131 @@ RUN_POSTGRES_RLS_TESTS=1 DATABASE_URL=postgresql://... pytest -q tests/test_row_
 
 ---
 
+## Docker-Based Local Development
+
+A `docker-compose.yml` is provided at the project root for quick local setup:
+
+```bash
+docker compose up --build
+```
+
+This starts three services:
+
+| Service | Image | Port | Purpose |
+|---|---|---|---|
+| **db** | postgres:15 | 5432 | PostgreSQL with health check |
+| **backend** | ./backend (Dockerfile) | 8000 | FastAPI + auto-runs `alembic upgrade head` |
+| **frontend** | ./frontend (Dockerfile) | 5173 | Vite React dev server |
+
+The backend container automatically runs migrations on startup. The database uses a named Docker volume (`pgdata`) so data persists across restarts.
+
+### Environment Overrides
+
+The compose file reads `backend/.env` for Cognito and SES credentials. Override `DATABASE_URL` in the compose environment block (already set to `postgresql://postgres:postgres@db:5432/authsystem`).
+
+For production, set `COOKIE_SECURE=true` and provide real Cognito/SES values.
+
+---
+
+## Cleanup Job Setup
+
+The module provides `cleanup_service.run_cleanup()` for purging expired data. Call it on a schedule (e.g. nightly cron).
+
+### Option A: Cron + Management Script
+
+Create a script (e.g. `backend/scripts/run_cleanup.py`):
+
+```python
+from app.database import SessionLocal
+from app.auth_usermanagement.services.cleanup_service import run_cleanup
+
+db = SessionLocal()
+try:
+    result = run_cleanup(
+        db,
+        invitation_days=30,       # purge expired/revoked invitations older than 30d
+        rate_limit_hours=24,      # purge rate-limit hits older than 24h
+        audit_retention_days=365, # purge audit events older than 1 year (0 to skip)
+    )
+    print(f"Cleanup: {result}")
+finally:
+    db.close()
+```
+
+Schedule with cron:
+
+```bash
+# Run nightly at 2 AM
+0 2 * * * cd /app && python scripts/run_cleanup.py
+```
+
+### Option B: Celery Beat
+
+```python
+from celery import Celery
+from celery.schedules import crontab
+
+app = Celery("myapp")
+
+@app.task
+def cleanup_auth_data():
+    from app.database import SessionLocal
+    from app.auth_usermanagement.services.cleanup_service import run_cleanup
+    db = SessionLocal()
+    try:
+        run_cleanup(db)
+    finally:
+        db.close()
+
+app.conf.beat_schedule = {
+    "auth-cleanup-nightly": {
+        "task": "cleanup_auth_data",
+        "schedule": crontab(hour=2, minute=0),
+    },
+}
+```
+
+### Default Retention Periods
+
+| Data | Default Retention | Configurable |
+|---|---|---|
+| Expired refresh tokens | Immediate (past `expires_at`) | No |
+| Expired/revoked invitations | 30 days | `invitation_days` |
+| Rate-limit hit records | 24 hours | `rate_limit_hours` |
+| Audit events | 365 days | `audit_retention_days` (0 = skip) |
+
+---
+
+## API Versioning
+
+The module's route prefix is configurable via `AUTH_API_PREFIX` (default: `/auth`). To version your API:
+
+```env
+AUTH_API_PREFIX=/v1/auth
+```
+
+All module endpoints will then be served under `/v1/auth/*`. The frontend must be updated to match:
+
+```env
+VITE_AUTH_API_BASE_PATH=/v1/auth
+```
+
+Existing clients using `/auth` will need to be migrated if you change the prefix.
+
+---
+
+## Suspended-User JWT Behavior
+
+When a user is suspended via `PATCH /users/{id}/suspend`:
+
+1. The user's `is_active` flag is set to `false` in the database
+2. A Cognito `AdminUserGlobalSignOut` is issued to revoke their refresh tokens
+3. Their existing access token (JWT) **remains valid** until it naturally expires (typically 1 hour)
+
+**Mitigation**: Every protected endpoint calls `get_current_user()`, which checks `is_active` against the database. A suspended user receives `401 Account suspended` on any API call, even with a valid JWT. The token gap is limited to the window between suspension and their next API call.
+
+---
+
 ## API Quick Reference
 
 All endpoints are mounted under the configured prefix (default: `/auth`).

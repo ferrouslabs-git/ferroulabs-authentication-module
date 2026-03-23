@@ -8,6 +8,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from app.auth_usermanagement.models.audit_event import AuditEvent
 from app.auth_usermanagement.models.membership import Membership
 from app.auth_usermanagement.models.tenant import Tenant
 from app.auth_usermanagement.models.user import User
@@ -155,6 +156,60 @@ def test_non_platform_admin_cannot_suspend_tenant(monkeypatch):
             )
             assert response.status_code == 403
             assert response.json()["detail"] == "Only platform administrators can suspend tenant user accounts"
+    finally:
+        app.dependency_overrides.clear()
+        Base.metadata.drop_all(engine)
+
+
+def test_platform_admin_can_list_failed_invitation_emails(monkeypatch):
+    engine, SessionLocal = _make_db()
+    ids = _seed_users_and_tenant(SessionLocal)
+
+    # Seed audit events
+    session = SessionLocal()
+    from uuid import UUID as _UUID
+    session.add(AuditEvent(
+        action="email_send_failed",
+        tenant_id=_UUID(ids["tenant_id"]),
+        metadata_json={
+            "to_email": "fail@example.com",
+            "provider": "ses",
+            "error_detail": "SES error: MessageRejected",
+            "target_id": str(uuid4()),
+        },
+    ))
+    session.add(AuditEvent(action="login", metadata_json={}))
+    session.commit()
+    session.close()
+
+    try:
+        with _client_with_auth(monkeypatch, SessionLocal, ids["platform_sub"]) as client:
+            response = client.get(
+                "/auth/platform/invitations/failed",
+                headers=_auth_headers(),
+            )
+            assert response.status_code == 200
+            payload = response.json()
+            assert len(payload) == 1
+            assert payload[0]["to_email"] == "fail@example.com"
+            assert payload[0]["provider"] == "ses"
+            assert payload[0]["error_detail"] == "SES error: MessageRejected"
+    finally:
+        app.dependency_overrides.clear()
+        Base.metadata.drop_all(engine)
+
+
+def test_non_admin_cannot_list_failed_invitation_emails(monkeypatch):
+    engine, SessionLocal = _make_db()
+    ids = _seed_users_and_tenant(SessionLocal)
+
+    try:
+        with _client_with_auth(monkeypatch, SessionLocal, ids["regular_sub"]) as client:
+            response = client.get(
+                "/auth/platform/invitations/failed",
+                headers=_auth_headers(),
+            )
+            assert response.status_code == 403
     finally:
         app.dependency_overrides.clear()
         Base.metadata.drop_all(engine)

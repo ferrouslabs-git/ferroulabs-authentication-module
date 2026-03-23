@@ -35,6 +35,7 @@ class Settings(BaseSettings):
 
     # Portability
     auth_namespace: str = os.getenv("AUTH_NAMESPACE", "authum")
+    # Default is "/auth". Set AUTH_API_PREFIX="/v1/auth" for versioned APIs.
     auth_api_prefix: str = os.getenv("AUTH_API_PREFIX", "/auth")
     auth_cookie_name: str = os.getenv("AUTH_COOKIE_NAME", "")
     auth_cookie_path: str = os.getenv("AUTH_COOKIE_PATH", "")

@@ -2,15 +2,22 @@
 JWT Token Verification for AWS Cognito
 Downloads JWKS and validates token signatures
 """
+import logging
+import threading
+import time
+from typing import Dict
+
 import requests
 from jose import jwt, JWTError
 from fastapi import HTTPException, status
-from functools import lru_cache
-from typing import Dict
 from pydantic import ValidationError
 
 from ..config import get_settings
 from ..schemas.token import TokenPayload
+
+logger = logging.getLogger(__name__)
+
+JWKS_TTL_SECONDS = 3600  # Re-fetch JWKS every hour
 
 
 class InvalidTokenError(HTTPException):
@@ -23,24 +30,64 @@ class InvalidTokenError(HTTPException):
         )
 
 
-@lru_cache()
-def get_jwks() -> Dict:
+class _JWKSCache:
+    """Thread-safe JWKS cache with TTL.
+
+    Fetches synchronously — safe because it only runs at startup or
+    once per TTL window (background threads never block the async loop
+    for more than ~1 request; subsequent requests use the cached value).
     """
-    Download and cache Cognito JSON Web Key Set (JWKS)
-    Used to verify JWT signatures
-    """
-    settings = get_settings()
-    jwks_url = (
-        f"https://cognito-idp.{settings.cognito_region}.amazonaws.com/"
-        f"{settings.cognito_user_pool_id}/.well-known/jwks.json"
-    )
-    
-    try:
+
+    def __init__(self, ttl: int = JWKS_TTL_SECONDS):
+        self._lock = threading.Lock()
+        self._jwks: Dict | None = None
+        self._fetched_at: float = 0.0
+        self._ttl = ttl
+
+    def _is_stale(self) -> bool:
+        return self._jwks is None or (time.monotonic() - self._fetched_at) >= self._ttl
+
+    def _fetch(self) -> Dict:
+        settings = get_settings()
+        jwks_url = (
+            f"https://cognito-idp.{settings.cognito_region}.amazonaws.com/"
+            f"{settings.cognito_user_pool_id}/.well-known/jwks.json"
+        )
         response = requests.get(jwks_url, timeout=10)
         response.raise_for_status()
         return response.json()
-    except requests.RequestException as e:
-        raise InvalidTokenError(f"Failed to fetch JWKS: {str(e)}")
+
+    def get(self) -> Dict:
+        if not self._is_stale():
+            return self._jwks  # type: ignore[return-value]
+
+        with self._lock:
+            # Double-check after acquiring lock
+            if not self._is_stale():
+                return self._jwks  # type: ignore[return-value]
+            try:
+                self._jwks = self._fetch()
+                self._fetched_at = time.monotonic()
+                logger.info("JWKS fetched/refreshed successfully")
+            except requests.RequestException as e:
+                if self._jwks is not None:
+                    logger.warning("JWKS refresh failed, using cached copy: %s", e)
+                    return self._jwks
+                raise InvalidTokenError(f"Failed to fetch JWKS: {str(e)}")
+        return self._jwks  # type: ignore[return-value]
+
+    def invalidate(self) -> None:
+        """Force next call to re-fetch (e.g. when a kid is not found)."""
+        with self._lock:
+            self._fetched_at = 0.0
+
+
+_jwks_cache = _JWKSCache()
+
+
+def get_jwks() -> Dict:
+    """Return cached Cognito JWKS, refreshing when the TTL expires."""
+    return _jwks_cache.get()
 
 
 def verify_token(token: str, allowed_token_uses: tuple[str, ...] = ("access",)) -> TokenPayload:
@@ -77,7 +124,15 @@ def verify_token(token: str, allowed_token_uses: tuple[str, ...] = ("access",)) 
                 break
         
         if not matching_key:
-            raise InvalidTokenError("No matching key found in JWKS")
+            # Key rotation: invalidate cache and retry once
+            _jwks_cache.invalidate()
+            jwks = get_jwks()
+            for key in jwks.get("keys", []):
+                if key.get("kid") == kid:
+                    matching_key = key
+                    break
+            if not matching_key:
+                raise InvalidTokenError("No matching key found in JWKS")
         
         issuer = (
             f"https://cognito-idp.{settings.cognito_region}.amazonaws.com/"
