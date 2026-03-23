@@ -7,7 +7,7 @@ from sqlalchemy.orm import relationship
 from datetime import UTC, datetime
 from uuid import uuid4
 
-from app.database import Base
+from ..database import Base
 
 
 def utc_now() -> datetime:

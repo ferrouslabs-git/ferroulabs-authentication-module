@@ -3,7 +3,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, Header, HTTPException, status
 from sqlalchemy.orm import Session
 
-from app.database import get_db
+from ..database import get_db
 
 from ..models.user import User
 from ..security import InvalidTokenError, get_current_user, verify_token

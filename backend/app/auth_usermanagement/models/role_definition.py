@@ -1,6 +1,6 @@
 from sqlalchemy import Column, String, DateTime, Boolean
 from datetime import datetime
-from app.database import Base
+from ..database import Base
 
 
 class RoleDefinition(Base):

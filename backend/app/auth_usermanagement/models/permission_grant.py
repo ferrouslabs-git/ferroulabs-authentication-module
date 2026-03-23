@@ -1,5 +1,5 @@
 from sqlalchemy import Column, String, ForeignKey, UniqueConstraint
-from app.database import Base
+from ..database import Base
 
 
 class PermissionGrant(Base):

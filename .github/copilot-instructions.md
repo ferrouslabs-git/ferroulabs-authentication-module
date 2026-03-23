@@ -21,6 +21,9 @@
 6. Import boundary rule:
 - No duplicate DB runtime modules for the same process.
 - Any compatibility adapter must be transitional only, explicitly marked, and scheduled for removal.
+- All files inside auth_usermanagement/ must use relative imports for DB objects (from ..database import Base/get_db).
+- Only auth_usermanagement/database.py may reference 'from app.database import ...'.
+- Enforced by test_db_runtime_guardrails.py::test_no_direct_host_database_imports_outside_bridge.
 
 7. Review gate rule:
 - Any PR that adds create_engine(), sessionmaker(), or declarative_base() in reusable module paths must be blocked unless explicitly approved as standalone sandbox code.

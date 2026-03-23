@@ -25,3 +25,8 @@ class ScopeContext:
         if self.is_super_admin:
             return True
         return all(p in self.resolved_permissions for p in perms)
+
+    @property
+    def role_name(self) -> str | None:
+        """Primary active role name (first in list), used for invite authority checks."""
+        return self.active_roles[0] if self.active_roles else None

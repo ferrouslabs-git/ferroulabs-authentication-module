@@ -7,7 +7,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 from uuid import UUID
 
-from app.database import get_db
+from ..database import get_db
 from ..security.jwt_verifier import verify_token
 from ..security.tenant_context import TenantContext
 from ..security.scope_context import ScopeContext

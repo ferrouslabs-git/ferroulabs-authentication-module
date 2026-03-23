@@ -79,7 +79,7 @@ async def create_invitation_response(
                 detail="Cannot invite with a role that has more permissions than your own",
             )
 
-    invitation = create_invitation(
+    invitation, raw_token = create_invitation(
         db=db,
         tenant_id=tenant_id,
         email=invite_data.email,
@@ -91,7 +91,7 @@ async def create_invitation_response(
     )
 
     settings = get_settings()
-    invite_url = f"{settings.frontend_url}/invite/{invitation.token}"
+    invite_url = f"{settings.frontend_url}/invite/{raw_token}"
     email_result = await send_invitation_email(
         to_email=invitation.email,
         invite_url=invite_url,
@@ -119,7 +119,7 @@ async def create_invitation_response(
         tenant_id=invitation.tenant_id,
         email=invitation.email,
         role=invitation.target_role_name,
-        token=invitation.token,
+        token=raw_token,
         expires_at=invitation.expires_at,
         message=message,
         status=invitation.status,

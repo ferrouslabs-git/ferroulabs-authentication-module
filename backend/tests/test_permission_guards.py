@@ -77,14 +77,15 @@ def test_bridge_platform_admin_sets_super_admin():
 
 def test_require_permission_passes_when_present():
     checker = require_permission("data:read")
-    ctx = _tenant_ctx(role="viewer")
+    ctx = _scope_ctx(permissions={"data:read", "account:read"}, roles=["account_member"])
     result = checker(ctx)
-    assert result.role == "viewer"
+    assert isinstance(result, ScopeContext)
+    assert "data:read" in result.resolved_permissions
 
 
 def test_require_permission_blocks_when_absent():
     checker = require_permission("account:delete")
-    ctx = _tenant_ctx(role="viewer")
+    ctx = _scope_ctx(permissions={"data:read"}, roles=["account_member"])
     with pytest.raises(HTTPException) as exc:
         checker(ctx)
     assert exc.value.status_code == 403
@@ -93,23 +94,23 @@ def test_require_permission_blocks_when_absent():
 
 def test_require_permission_passes_for_super_admin():
     checker = require_permission("account:delete")
-    ctx = _tenant_ctx(role=None, is_platform_admin=True)
+    ctx = _scope_ctx(is_super_admin=True)
     result = checker(ctx)
-    assert result.is_platform_admin is True
+    assert result.is_super_admin is True
 
 
 # ── require_any_permission ───────────────────────────────────────
 
 def test_require_any_permission_passes_if_one_present():
     checker = require_any_permission(["data:read", "data:write"])
-    ctx = _tenant_ctx(role="viewer")  # has data:read but not data:write
+    ctx = _scope_ctx(permissions={"data:read"}, roles=["account_member"])
     result = checker(ctx)
     assert result is not None
 
 
 def test_require_any_permission_blocks_if_none_present():
     checker = require_any_permission(["account:delete", "spaces:create"])
-    ctx = _tenant_ctx(role="viewer")
+    ctx = _scope_ctx(permissions={"data:read"}, roles=["account_member"])
     with pytest.raises(HTTPException) as exc:
         checker(ctx)
     assert exc.value.status_code == 403
@@ -119,14 +120,14 @@ def test_require_any_permission_blocks_if_none_present():
 
 def test_require_all_permissions_passes_when_all_present():
     checker = require_all_permissions(["data:read", "data:write"])
-    ctx = _tenant_ctx(role="member")  # has both
+    ctx = _scope_ctx(permissions={"data:read", "data:write"}, roles=["account_member"])
     result = checker(ctx)
     assert result is not None
 
 
 def test_require_all_permissions_blocks_when_only_some():
     checker = require_all_permissions(["data:read", "members:manage"])
-    ctx = _tenant_ctx(role="viewer")  # has data:read but not members:manage
+    ctx = _scope_ctx(permissions={"data:read"}, roles=["account_member"])
     with pytest.raises(HTTPException) as exc:
         checker(ctx)
     assert exc.value.status_code == 403
@@ -135,16 +136,28 @@ def test_require_all_permissions_blocks_when_only_some():
 # ── require_super_admin ──────────────────────────────────────────
 
 def test_require_super_admin_passes():
-    ctx = _tenant_ctx(role=None, is_platform_admin=True)
+    ctx = _scope_ctx(is_super_admin=True)
     result = require_super_admin(ctx)
-    assert result.is_platform_admin is True
+    assert result.is_super_admin is True
 
 
 def test_require_super_admin_blocks_normal_user():
-    ctx = _tenant_ctx(role="owner", is_platform_admin=False)
+    ctx = _scope_ctx(permissions={"account:delete"}, roles=["account_owner"])
     with pytest.raises(HTTPException) as exc:
         require_super_admin(ctx)
     assert exc.value.status_code == 403
+
+
+# ── ScopeContext.role_name property ──────────────────────────────
+
+def test_scope_context_role_name_returns_first_role():
+    ctx = _scope_ctx(roles=["account_owner", "account_admin"])
+    assert ctx.role_name == "account_owner"
+
+
+def test_scope_context_role_name_none_when_empty():
+    ctx = _scope_ctx(roles=[])
+    assert ctx.role_name is None
 
 
 # ── Deprecated wrappers still work ───────────────────────────────

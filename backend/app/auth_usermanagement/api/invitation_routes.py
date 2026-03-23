@@ -3,7 +3,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from app.database import get_db
+from ..database import get_db
 
 from ..models.user import User
 from ..schemas.invitation import (
@@ -59,7 +59,7 @@ async def preview_invitation(token: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invitation not found")
 
     return InvitationPreviewResponse(
-        token=invitation.token,
+        token=token,
         tenant_id=invitation.tenant_id,
         tenant_name=invitation.tenant.name,
         email=invitation.email,

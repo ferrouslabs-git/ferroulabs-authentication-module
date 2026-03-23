@@ -85,7 +85,7 @@ def test_create_invitation_normalizes_email_and_persists():
     tenant_id = uuid4()
     creator = uuid4()
 
-    invitation = create_invitation(
+    invitation, raw_token = create_invitation(
         db=db,
         tenant_id=tenant_id,
         email="  PERSON@Example.COM  ",
@@ -99,6 +99,8 @@ def test_create_invitation_normalizes_email_and_persists():
     assert invitation.created_by == creator
     assert invitation.target_role_name == "account_member"
     assert invitation.token
+    assert raw_token  # raw token is returned separately
+    assert invitation.token != raw_token  # DB stores hash, not plaintext
     assert db.commits == 1
     assert invitation in db.added
 
@@ -123,7 +125,7 @@ def test_create_invitation_expires_previous_pending_for_same_email_and_tenant():
         email="PERSON@example.com",
         role="admin",
         created_by=uuid4(),
-    )
+    )[0]  # unpack invitation from tuple
 
     assert pending.expires_at <= datetime.utcnow()
     assert pending.expires_at < original_expiry
@@ -287,7 +289,7 @@ def test_create_invitation_derives_scope_from_legacy_role():
     invitation = create_invitation(
         db=db, tenant_id=tenant_id, email="test@example.com",
         role="admin", created_by=uuid4(),
-    )
+    )[0]
 
     assert invitation.target_scope_type == "account"
     assert invitation.target_scope_id == tenant_id
@@ -306,7 +308,7 @@ def test_create_invitation_respects_explicit_scope():
         target_scope_type="space",
         target_scope_id=space_id,
         target_role_name="space_admin",
-    )
+    )[0]
 
     assert invitation.target_scope_type == "space"
     assert invitation.target_scope_id == space_id
@@ -319,10 +321,11 @@ def test_create_invitation_token_is_unique():
     tid = uuid4()
     creator = uuid4()
 
-    inv1 = create_invitation(db=db, tenant_id=tid, email="a@example.com",
+    inv1, tok1 = create_invitation(db=db, tenant_id=tid, email="a@example.com",
                              role="member", created_by=creator)
-    inv2 = create_invitation(db=db, tenant_id=tid, email="b@example.com",
+    inv2, tok2 = create_invitation(db=db, tenant_id=tid, email="b@example.com",
                              role="member", created_by=creator)
 
-    assert inv1.token != inv2.token
+    assert tok1 != tok2
     assert inv1.token_hash != inv2.token_hash
+    assert inv1.token == inv1.token_hash  # DB stores hash, not plaintext

@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from ..models.audit_event import AuditEvent
 
-logger = logging.getLogger("trustos.audit")
+logger = logging.getLogger(__name__)
 
 
 def utc_now() -> datetime:

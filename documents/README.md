@@ -1,102 +1,50 @@
 # Documentation Index
 
-Last updated: 2026-03-08
-
-This folder contains all planning, verification, and implementation documentation for the ferrouslabs-auth-system project.
+Last updated: 2026-03-23 — v3.0 (three-layer scope architecture)
 
 ---
 
-## 📋 Quick Start
+## Quick Start
 
-**New to this project?** Start here:
-1. Read [feature_details.md](feature_details.md) - System overview and capabilities
-2. Review [current_stage_priority_todo.md](current_stage_priority_todo.md) - What to work on next
-
-**Setting up Cognito?**
-- See [cognito_setup.md](cognito_setup.md) - AWS Cognito configuration guide
-
-**Working on Priority 2?**
-- [priority2_verification_report.md](priority2_verification_report.md) - Gap analysis and completion status
-- [priority2_manual_test_scenarios.md](priority2_manual_test_scenarios.md) - 40+ test scenarios
-- [priority2_implementation_summary.md](priority2_implementation_summary.md) - Tonight's work summary
+| Goal | Document |
+|------|----------|
+| **Integrate this module into a new project** | [setup_guide.md](setup_guide.md) |
+| **AI agent / LLM context for coding** | [agent_reference.md](agent_reference.md) |
+| **Cognito setup + SSO federation** | [cognito_and_sso_guide.md](cognito_and_sso_guide.md) |
 
 ---
 
-## 📁 Document Catalog
+## Document Catalog
 
-### System Overview
+### Core Documentation (v3.0)
+
 | Document | Purpose | Audience |
 |----------|---------|----------|
-| [feature_details.md](feature_details.md) | System identity, intent, and feature inventory | AI agents, developers |
+| [setup_guide.md](setup_guide.md) | Step-by-step host integration guide — DB wiring, middleware, routes, env vars, migrations, frontend | Developers |
+| [agent_reference.md](agent_reference.md) | Complete system reference — file tree, data model, permission system, API endpoints, service signatures, invariants | AI agents, developers |
 
-### Planning & Priorities
-| Document | Purpose | Audience |
-|----------|---------|----------|
-| [current_stage_priority_todo.md](current_stage_priority_todo.md) | Recommended priority order with checklists | Team leads, developers |
+### Setup & Configuration
 
-### Setup Guides
-| Document | Purpose | Audience |
-|----------|---------|----------|
-| [cognito_setup.md](cognito_setup.md) | AWS Cognito configuration steps | DevOps, developers |
-
-### Priority 2 (Admin UI)
-| Document | Purpose | Audience |
-|----------|---------|----------|
-| [priority2_verification_report.md](priority2_verification_report.md) | Technical verification and gap analysis | Developers, QA |
-| [priority2_manual_test_scenarios.md](priority2_manual_test_scenarios.md) | Detailed test scenarios (40+) | QA, developers |
-| [priority2_implementation_summary.md](priority2_implementation_summary.md) | Implementation summary for tonight | Team leads, developers |
+| Document | Purpose |
+|----------|---------|
+| [cognito_and_sso_guide.md](cognito_and_sso_guide.md) | Cognito base setup, SSO provider config (Google/Azure), federation wiring, multi-tenant SSO planning |
 
 ### Archive
-| Document | Purpose | Status |
-|----------|---------|--------|
-| [old_docs/](old_docs/) | Earlier planning documents | Reference only |
+
+| Folder | Contents |
+|--------|----------|
+| [old_docs/](old_docs/) | v1/v2 planning, implementation summaries, step docs, and priority reports — kept for historical reference |
 
 ---
 
-## 🎯 Current Project Status
+## For AI Coding Agents
 
-**Priority 2 (Admin UI):** 🟡 85% Complete
-- ✅ Implementation done
-- ⏳ Manual testing pending
-- See [priority2_implementation_summary.md](priority2_implementation_summary.md)
+Start here: **[agent_reference.md](agent_reference.md)** — contains the complete system architecture, every file path, all function signatures, data model, permission system, API endpoints, and modification patterns.
 
-**Priority 1 (RDS Migration):** ⏳ Scheduled for tomorrow
-- See [current_stage_priority_todo.md](current_stage_priority_todo.md)
-
-**Priority 3 (Mock App):** ⏳ Not started
-
----
-
-## 🔄 Document Maintenance
-
-### When to Update This Index
-- When adding new top-level documents
-- When changing priority order
-- When completing major milestones
-- At end of each work session
-
-### Document Naming Convention
-- System overview: `feature_details.md`, `architecture.md`
-- Planning: `priority_todo.md`, `roadmap.md`
-- Setup: `[service]_setup.md` (e.g., `cognito_setup.md`)
-- Verification: `[priority]_verification_report.md`
-- Testing: `[priority]_manual_test_scenarios.md`
-- Implementation: `[priority]_implementation_summary.md`
-
----
-
-## 📝 For AI Coding Agents
-
-When starting a new session:
-
-1. **Context gathering:**
-   - Read [feature_details.md](feature_details.md) for system overview
-   - Read [current_stage_priority_todo.md](current_stage_priority_todo.md) for current priorities
-
-2. **Before making changes:**
-   - Check relevant verification reports
-   - Review test scenarios
-   - Note any schema change warnings
+Key files to read for full context:
+1. `agent_reference.md` — system overview + reference
+2. `backend/app/auth_usermanagement/auth_config.yaml` — role/permission definitions
+3. `.github/copilot-instructions.md` — integration boundary rules
 
 3. **After making changes:**
    - Update verification reports with completion status

@@ -44,8 +44,13 @@ def create_invitation(
     target_scope_type: str | None = None,
     target_scope_id: UUID | None = None,
     target_role_name: str | None = None,
-) -> Invitation:
+) -> tuple["Invitation", str]:
     """Create a new invitation token for a user email within a tenant/scope.
+
+    Returns:
+        Tuple of (invitation, raw_token). The raw_token is NOT stored in the
+        database — only its SHA-256 hash is persisted. The caller must use the
+        returned raw_token for email URLs and API responses.
 
     If a pending invitation already exists for the same email+tenant, revoke the
     older one so only the latest token remains active.
@@ -73,14 +78,15 @@ def create_invitation(
         pending.expires_at = now
 
     raw_token = token_urlsafe(32)
+    hashed = hash_token(raw_token)
     resolved_scope_type = target_scope_type or "account"
     resolved_scope_id = target_scope_id or tenant_id
     resolved_role_name = target_role_name or _LEGACY_TO_V3.get(role, role)
     invitation = Invitation(
         tenant_id=tenant_id,
         email=normalized_email,
-        token=raw_token,
-        token_hash=hash_token(raw_token),
+        token=hashed,
+        token_hash=hashed,
         expires_at=now + timedelta(days=expires_in_days),
         created_by=created_by,
         target_scope_type=resolved_scope_type,
@@ -90,7 +96,7 @@ def create_invitation(
     db.add(invitation)
     db.commit()
     db.refresh(invitation)
-    return invitation
+    return invitation, raw_token
 
 
 def get_invitation_by_token(db: Session, token: str) -> Invitation | None:

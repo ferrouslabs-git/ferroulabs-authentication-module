@@ -93,7 +93,7 @@ class TestCreateScopedInvitation:
             target_scope_type="account",
             target_scope_id=tenant_id,
             target_role_name="account_admin",
-        )
+        )[0]
 
         assert inv.target_scope_type == "account"
         assert inv.target_scope_id == tenant_id
@@ -114,7 +114,7 @@ class TestCreateScopedInvitation:
             target_scope_type="space",
             target_scope_id=space_id,
             target_role_name="space_member",
-        )
+        )[0]
 
         assert inv.target_scope_type == "space"
         assert inv.target_scope_id == space_id
@@ -131,7 +131,7 @@ class TestCreateScopedInvitation:
             email="c@example.com",
             role="member",
             created_by=uuid4(),
-        )
+        )[0]
 
         assert inv.target_scope_type == "account"
         assert inv.target_scope_id == tenant_id

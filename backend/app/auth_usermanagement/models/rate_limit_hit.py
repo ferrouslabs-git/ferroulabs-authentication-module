@@ -5,7 +5,7 @@ from uuid import uuid4
 from sqlalchemy import Column, String, DateTime
 from sqlalchemy.dialects.postgresql import UUID
 
-from app.database import Base
+from ..database import Base
 
 
 class RateLimitHit(Base):

@@ -4,7 +4,7 @@ Permission-based authorization guards (v3.0)
 Guards are FastAPI dependencies that enforce permissions via ScopeContext.
 The new pattern checks resolved_permissions rather than role name strings.
 
-New guards (use these):
+New guards (use these) — depend on get_scope_context, return ScopeContext:
     require_permission(perm)         — single permission check
     require_any_permission(perms)    — any one of listed permissions
     require_all_permissions(perms)   — all listed permissions
@@ -12,7 +12,7 @@ New guards (use these):
 
 Deprecated guards (60-day window → remove after 2026-05-20):
     require_role, require_min_role   — role-name based (emit DeprecationWarning)
-    require_owner/admin/member/viewer — thin wrappers over require_permission
+    require_owner/admin/member/viewer — use legacy bridge, return TenantContext
 
 Example Usage:
     @router.delete("/users/{user_id}")
@@ -29,35 +29,28 @@ from fastapi import Depends, HTTPException, status
 
 from .scope_context import ScopeContext
 from .tenant_context import TenantContext
-from .dependencies import get_tenant_context
+from .dependencies import get_scope_context, get_tenant_context
 
 
 # ── New permission-based guards ──────────────────────────────────
 
 
 def require_permission(permission: str) -> Callable:
-    """Require a single permission in the caller's ScopeContext.
-
-    Until get_scope_context is wired (Task 4), the dependency still
-    resolves via get_tenant_context and builds a minimal ScopeContext
-    using the compatibility bridge below.
-    """
-    def checker(ctx: TenantContext = Depends(get_tenant_context)) -> TenantContext:
-        scope = _bridge_to_scope(ctx)
-        if not scope.has_permission(permission) and not scope.is_super_admin:
+    """Require a single permission in the caller's ScopeContext."""
+    def checker(ctx: ScopeContext = Depends(get_scope_context)) -> ScopeContext:
+        if not ctx.has_permission(permission):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"Access denied. Required permission: {permission}",
             )
-        return ctx   # return TenantContext until Task 4 switches callers
+        return ctx
     return checker
 
 
 def require_any_permission(permissions: list[str]) -> Callable:
     """Require at least one of the listed permissions."""
-    def checker(ctx: TenantContext = Depends(get_tenant_context)) -> TenantContext:
-        scope = _bridge_to_scope(ctx)
-        if not scope.has_any_permission(permissions) and not scope.is_super_admin:
+    def checker(ctx: ScopeContext = Depends(get_scope_context)) -> ScopeContext:
+        if not ctx.has_any_permission(permissions):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"Access denied. Required one of: {', '.join(permissions)}",
@@ -68,9 +61,8 @@ def require_any_permission(permissions: list[str]) -> Callable:
 
 def require_all_permissions(permissions: list[str]) -> Callable:
     """Require all of the listed permissions."""
-    def checker(ctx: TenantContext = Depends(get_tenant_context)) -> TenantContext:
-        scope = _bridge_to_scope(ctx)
-        if not scope.has_all_permissions(permissions) and not scope.is_super_admin:
+    def checker(ctx: ScopeContext = Depends(get_scope_context)) -> ScopeContext:
+        if not ctx.has_all_permissions(permissions):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"Access denied. Required all of: {', '.join(permissions)}",
@@ -79,9 +71,9 @@ def require_all_permissions(permissions: list[str]) -> Callable:
     return checker
 
 
-def require_super_admin(ctx: TenantContext = Depends(get_tenant_context)) -> TenantContext:
+def require_super_admin(ctx: ScopeContext = Depends(get_scope_context)) -> ScopeContext:
     """Require is_super_admin (platform admin)."""
-    if not ctx.is_platform_admin:
+    if not ctx.is_super_admin:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Access denied. Super admin required.",
@@ -89,9 +81,9 @@ def require_super_admin(ctx: TenantContext = Depends(get_tenant_context)) -> Ten
     return ctx
 
 
-# ── Compatibility bridge ─────────────────────────────────────────
-# Translates legacy TenantContext → ScopeContext with resolved_permissions
-# so new guard logic works before Task 4 replaces the dependency path.
+# ── Compatibility bridge (deprecated guards only) ────────────────
+# Translates legacy TenantContext → ScopeContext with hardcoded permissions.
+# Used only by deprecated guards below. New guards use get_scope_context directly.
 
 _LEGACY_ROLE_PERMISSIONS: dict[str, set[str]] = {
     "owner": {
