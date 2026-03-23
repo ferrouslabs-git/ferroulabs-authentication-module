@@ -40,8 +40,9 @@ def create_tenant(
     # Create owner membership for the creator
     membership = Membership(
         user_id=user.id,
-        tenant_id=tenant.id,
-        role="owner",
+        scope_type="account",
+        scope_id=tenant.id,
+        role_name="account_owner",
         status="active"
     )
     db.add(membership)
@@ -78,18 +79,19 @@ def get_user_tenants(user_id: UUID, db: Session) -> List[dict]:
     """
     memberships = db.query(Membership).filter(
         Membership.user_id == user_id,
+        Membership.scope_type == "account",
         Membership.status == "active"
     ).all()
     
     result = []
     for membership in memberships:
         tenant_data = {
-            "id": membership.tenant.id,
-            "name": membership.tenant.name,
-            "plan": membership.tenant.plan,
-            "status": membership.tenant.status,
-            "role": membership.role,
-            "created_at": membership.tenant.created_at
+            "id": membership.tenant.id if membership.tenant else membership.scope_id,
+            "name": membership.tenant.name if membership.tenant else None,
+            "plan": membership.tenant.plan if membership.tenant else None,
+            "status": membership.tenant.status if membership.tenant else None,
+            "role": membership.role_name,
+            "created_at": membership.tenant.created_at if membership.tenant else None
         }
         result.append(tenant_data)
     
@@ -114,11 +116,12 @@ def get_user_tenant_role(
     """
     membership = db.query(Membership).filter(
         Membership.user_id == user_id,
-        Membership.tenant_id == tenant_id,
+        Membership.scope_type == "account",
+        Membership.scope_id == tenant_id,
         Membership.status == "active"
     ).first()
     
-    return membership.role if membership else None
+    return membership.role_name if membership else None
 
 
 def list_platform_tenants(db: Session) -> List[dict]:
@@ -135,7 +138,7 @@ def list_platform_tenants(db: Session) -> List[dict]:
             "owner_count": sum(
                 1
                 for membership in tenant.memberships
-                if membership.status == "active" and membership.role == "owner"
+                if membership.status == "active" and membership.role_name in ("account_owner", "owner")
             ),
         }
         for tenant in tenants
@@ -160,7 +163,8 @@ def verify_user_tenant_access(
     """
     membership = db.query(Membership).filter(
         Membership.user_id == user_id,
-        Membership.tenant_id == tenant_id,
+        Membership.scope_type == "account",
+        Membership.scope_id == tenant_id,
         Membership.status == "active"
     ).first()
     

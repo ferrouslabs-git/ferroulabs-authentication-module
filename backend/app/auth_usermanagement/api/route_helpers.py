@@ -6,12 +6,19 @@ from sqlalchemy.orm import Session
 from ..config import get_settings
 from ..models.user import User
 from ..schemas.invitation import InvitationCreateRequest, InvitationCreateResponse
-from ..security import TenantContext
+from ..security import ScopeContext, TenantContext
 from ..services.audit_service import log_audit_event
+from ..services.auth_config_loader import get_auth_config
 from ..services.email_service import send_invitation_email
 from ..services.invitation_service import create_invitation
 
 
+def ensure_scope_access(scope_id: UUID, ctx: ScopeContext) -> None:
+    if scope_id != ctx.scope_id and not ctx.is_super_admin:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Scope mismatch")
+
+
+# DEPRECATED: Use ensure_scope_access. Remove after 2026-05-20.
 def ensure_tenant_access(tenant_id: UUID, ctx: TenantContext) -> None:
     if tenant_id != ctx.tenant_id and not ctx.is_platform_admin:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Tenant mismatch")
@@ -49,13 +56,38 @@ async def create_invitation_response(
     tenant_id: UUID,
     invite_data: InvitationCreateRequest,
     current_user: User,
+    ctx: ScopeContext | None = None,
 ) -> InvitationCreateResponse:
+    # --- Resolve scope fields (defaults from context or legacy) ---
+    target_scope_type = invite_data.target_scope_type
+    target_scope_id = invite_data.target_scope_id
+    target_role_name = invite_data.target_role_name
+
+    if ctx and not target_scope_type:
+        target_scope_type = ctx.scope_type
+    if ctx and not target_scope_id:
+        target_scope_id = ctx.scope_id
+
+    # --- Invite authority check: inviter permissions must be superset of target role ---
+    if target_role_name and ctx and not ctx.is_super_admin:
+        config = get_auth_config()
+        inviter_perms = config.permissions_for_role(ctx.role_name)
+        target_perms = config.permissions_for_role(target_role_name)
+        if not target_perms.issubset(inviter_perms):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Cannot invite with a role that has more permissions than your own",
+            )
+
     invitation = create_invitation(
         db=db,
         tenant_id=tenant_id,
         email=invite_data.email,
         role=invite_data.role,
         created_by=current_user.id,
+        target_scope_type=target_scope_type,
+        target_scope_id=target_scope_id,
+        target_role_name=target_role_name,
     )
 
     settings = get_settings()
@@ -72,7 +104,7 @@ async def create_invitation_response(
         db=db,
         tenant_id=str(tenant_id),
         invited_email=invite_data.email,
-        invited_role=invite_data.role,
+        invited_role=invite_data.target_role_name or invite_data.role,
         invitation_id=str(invitation.id),
         email_sent=email_result.sent,
         email_provider=email_result.provider,
@@ -86,11 +118,14 @@ async def create_invitation_response(
         invitation_id=invitation.id,
         tenant_id=invitation.tenant_id,
         email=invitation.email,
-        role=invitation.role,
+        role=invitation.target_role_name,
         token=invitation.token,
         expires_at=invitation.expires_at,
         message=message,
         status=invitation.status,
         email_sent=email_result.sent,
         email_detail=email_result.detail,
+        target_scope_type=invitation.target_scope_type,
+        target_scope_id=invitation.target_scope_id,
+        target_role_name=invitation.target_role_name,
     )

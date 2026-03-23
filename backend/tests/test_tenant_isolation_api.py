@@ -28,8 +28,9 @@ def _seed_user_and_tenants(db_session):
 
     membership_a = Membership(
         user_id=user.id,
-        tenant_id=tenant_a.id,
-        role="owner",
+        scope_type="account",
+        scope_id=tenant_a.id,
+        role_name="account_owner",
         status="active",
     )
     db_session.add(membership_a)

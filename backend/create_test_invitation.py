@@ -53,7 +53,7 @@ def main():
         print("✅ Test invitation created successfully!")
         print(f"   Tenant: {tenant.name}")
         print(f"   Email: {invitation.email}")
-        print(f"   Role: {invitation.role}")
+        print(f"   Role: {invitation.target_role_name}")
         print(f"   Token: {invitation.token}")
         print(f"   Expires: {invitation.expires_at}")
         print()

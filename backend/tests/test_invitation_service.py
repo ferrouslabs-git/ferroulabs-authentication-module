@@ -52,15 +52,17 @@ class _FakeSession:
         return _FakeQuery(None)
 
 
-def _invitation(email: str = "user@example.com", role: str = "member", days: int = 7, accepted: bool = False):
+def _invitation(email: str = "user@example.com", role_name: str = "account_member", days: int = 7, accepted: bool = False):
     inv = Invitation(
         id=uuid4(),
         tenant_id=uuid4(),
         email=email,
-        role=role,
         token="tok",
         expires_at=datetime.utcnow() + timedelta(days=days),
         created_by=uuid4(),
+        target_scope_type="account",
+        target_scope_id=uuid4(),
+        target_role_name=role_name,
     )
     if accepted:
         inv.accepted_at = datetime.utcnow()
@@ -95,7 +97,7 @@ def test_create_invitation_normalizes_email_and_persists():
     assert invitation.email == "person@example.com"
     assert invitation.tenant_id == tenant_id
     assert invitation.created_by == creator
-    assert invitation.role == "viewer"
+    assert invitation.target_role_name == "account_member"
     assert invitation.token
     assert db.commits == 1
     assert invitation in db.added
@@ -107,7 +109,7 @@ def test_create_invitation_expires_previous_pending_for_same_email_and_tenant():
         id=uuid4(),
         tenant_id=tenant_id,
         email="person@example.com",
-        role="member",
+        target_role_name="account_member",
         token="old",
         expires_at=datetime.utcnow() + timedelta(days=5),
         created_by=uuid4(),
@@ -160,27 +162,30 @@ def test_accept_invitation_rejects_revoked_invitation():
 def test_accept_invitation_reactivates_existing_membership_without_downgrade():
     existing = Membership(
         user_id=uuid4(),
-        tenant_id=uuid4(),
-        role="owner",
+        scope_type="account",
+        scope_id=uuid4(),
+        role_name="account_owner",
         status="removed",
     )
     db = _FakeSession(membership_result=existing)
 
     invitation = Invitation(
         id=uuid4(),
-        tenant_id=existing.tenant_id,
+        tenant_id=uuid4(),
         email="user@example.com",
-        role="member",
         token="tok",
         expires_at=datetime.utcnow() + timedelta(days=1),
         created_by=uuid4(),
+        target_scope_type="account",
+        target_scope_id=existing.scope_id,
+        target_role_name="account_member",
     )
     user = SimpleNamespace(id=existing.user_id, email="user@example.com")
 
     membership = accept_invitation(db, invitation, user)
 
     assert membership is existing
-    assert membership.role == "owner"
+    assert membership.role_name == "account_owner"
     assert membership.status == "active"
     assert invitation.accepted_at is not None
     assert db.commits == 1
@@ -188,14 +193,14 @@ def test_accept_invitation_reactivates_existing_membership_without_downgrade():
 
 def test_accept_invitation_creates_membership_for_new_user():
     db = _FakeSession(membership_result=None)
-    invitation = _invitation(email="new@example.com", role="admin")
+    invitation = _invitation(email="new@example.com", role_name="account_admin")
     user = SimpleNamespace(id=uuid4(), email="new@example.com")
 
     membership = accept_invitation(db, invitation, user)
 
     assert membership.user_id == user.id
-    assert membership.tenant_id == invitation.tenant_id
-    assert membership.role == "admin"
+    assert membership.scope_type == "account"
+    assert membership.role_name == "account_admin"
     assert membership.status == "active"
     assert invitation.accepted_at is not None
     assert db.commits == 1
@@ -221,3 +226,103 @@ def test_revoke_invitation_rejects_accepted_invitation():
 
     with pytest.raises(ValueError, match="cannot be revoked"):
         revoke_invitation(db, invitation)
+
+
+# ── Corner cases ────────────────────────────────────────────────
+
+
+def test_revoke_already_revoked_invitation_raises():
+    db = _FakeSession()
+    invitation = _invitation()
+    invitation.revoked_at = datetime.utcnow()
+
+    with pytest.raises(ValueError, match="already revoked"):
+        revoke_invitation(db, invitation)
+
+
+def test_accept_already_accepted_invitation_raises():
+    db = _FakeSession()
+    invitation = _invitation(accepted=True)
+    user = SimpleNamespace(id=uuid4(), email="user@example.com")
+
+    with pytest.raises(ValueError, match="already been accepted"):
+        accept_invitation(db, invitation, user)
+
+
+def test_accept_invitation_upgrades_when_invited_role_has_more_permissions():
+    """When the invited role has permissions not in the existing role, upgrade."""
+    existing = Membership(
+        user_id=uuid4(),
+        scope_type="account",
+        scope_id=uuid4(),
+        role_name="account_member",
+        status="active",
+    )
+    db = _FakeSession(membership_result=existing)
+
+    invitation = Invitation(
+        id=uuid4(),
+        tenant_id=uuid4(),
+        email="user@example.com",
+        token="tok",
+        expires_at=datetime.utcnow() + timedelta(days=1),
+        created_by=uuid4(),
+        target_scope_type="account",
+        target_scope_id=existing.scope_id,
+        target_role_name="account_admin",
+    )
+    user = SimpleNamespace(id=existing.user_id, email="user@example.com")
+
+    membership = accept_invitation(db, invitation, user)
+
+    # account_admin has permissions not in account_member → upgrade
+    assert membership.role_name == "account_admin"
+
+
+def test_create_invitation_derives_scope_from_legacy_role():
+    """When target_scope_type is not provided, defaults to account scope."""
+    db = _InviteCreateSession()
+    tenant_id = uuid4()
+
+    invitation = create_invitation(
+        db=db, tenant_id=tenant_id, email="test@example.com",
+        role="admin", created_by=uuid4(),
+    )
+
+    assert invitation.target_scope_type == "account"
+    assert invitation.target_scope_id == tenant_id
+    assert invitation.target_role_name == "account_admin"
+
+
+def test_create_invitation_respects_explicit_scope():
+    """Explicit target_scope_type/id/role_name overrides legacy defaults."""
+    db = _InviteCreateSession()
+    tenant_id = uuid4()
+    space_id = uuid4()
+
+    invitation = create_invitation(
+        db=db, tenant_id=tenant_id, email="test@example.com",
+        role="member", created_by=uuid4(),
+        target_scope_type="space",
+        target_scope_id=space_id,
+        target_role_name="space_admin",
+    )
+
+    assert invitation.target_scope_type == "space"
+    assert invitation.target_scope_id == space_id
+    assert invitation.target_role_name == "space_admin"
+
+
+def test_create_invitation_token_is_unique():
+    """Each invitation gets a unique token."""
+    db = _InviteCreateSession()
+    tid = uuid4()
+    creator = uuid4()
+
+    inv1 = create_invitation(db=db, tenant_id=tid, email="a@example.com",
+                             role="member", created_by=creator)
+    inv2 = create_invitation(db=db, tenant_id=tid, email="b@example.com",
+                             role="member", created_by=creator)
+
+    assert inv1.token != inv2.token
+    assert inv1.token_hash != inv2.token_hash

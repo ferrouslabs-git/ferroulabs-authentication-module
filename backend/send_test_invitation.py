@@ -38,7 +38,7 @@ async def main():
         print(f"📧 Sending invitation email...")
         print(f"   To: {invitation.email}")
         print(f"   Tenant: {invitation.tenant.name}")
-        print(f"   Role: {invitation.role}")
+        print(f"   Role: {invitation.target_role_name}")
         print(f"   URL: {invite_url}")
         print()
         

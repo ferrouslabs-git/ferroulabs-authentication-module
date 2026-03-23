@@ -6,8 +6,8 @@ import { useToast } from "./Toast";
 import { PERMISSIONS, checkPermission } from "../constants/permissions";
 import { getErrorMessage, getSuccessMessage } from "../utils/errorHandling";
 
-export function InviteUserModal({ className, onClose, onSuccess }) {
-  const { token, tenantId, user: currentUser } = useAuth();
+export function InviteUserModal({ className, onClose, onSuccess, spaceId }) {
+  const { token, tenantId, user: currentUser, roleDefinitions, currentSpaceId } = useAuth();
   const { role: tenantRole } = useRole();
   const toast = useToast();
   
@@ -16,9 +16,15 @@ export function InviteUserModal({ className, onClose, onSuccess }) {
   
   const [email, setEmail] = useState("");
   const [role, setRole] = useState("member");
+  const [targetRoleName, setTargetRoleName] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [validationError, setValidationError] = useState("");
   const [existingUsers, setExistingUsers] = useState([]);
+
+  // Determine which layer's roles to show
+  const effectiveSpaceId = spaceId || currentSpaceId;
+  const scopeLayer = effectiveSpaceId ? "space" : "account";
+  const configRoles = roleDefinitions?.roles?.[scopeLayer] || [];
 
   // Load existing users to check for duplicates
   useEffect(() => {
@@ -91,7 +97,13 @@ export function InviteUserModal({ className, onClose, onSuccess }) {
     setValidationError("");
 
     try {
-      const result = await inviteTenantUser(token, tenantId, email.trim(), role);
+      const scopeOpts = {};
+      if (targetRoleName) scopeOpts.targetRoleName = targetRoleName;
+      if (effectiveSpaceId) {
+        scopeOpts.scopeType = "space";
+        scopeOpts.scopeId = effectiveSpaceId;
+      }
+      const result = await inviteTenantUser(token, tenantId, email.trim(), role, scopeOpts);
       if (result?.email_sent) {
         toast.success(result.message || getSuccessMessage('invite_user', { email }));
       } else {
@@ -187,8 +199,19 @@ export function InviteUserModal({ className, onClose, onSuccess }) {
         </label>
         <select
           id="invite-role"
-          value={role}
-          onChange={(e) => setRole(e.target.value)}
+          value={configRoles.length > 0 ? targetRoleName : role}
+          onChange={(e) => {
+            const val = e.target.value;
+            if (configRoles.length > 0) {
+              setTargetRoleName(val);
+              // Map v3 role to legacy for backward compat
+              if (val.includes("admin")) setRole("admin");
+              else if (val.includes("viewer")) setRole("viewer");
+              else setRole("member");
+            } else {
+              setRole(val);
+            }
+          }}
           style={{ 
             width: "100%", 
             marginBottom: 20,
@@ -199,9 +222,19 @@ export function InviteUserModal({ className, onClose, onSuccess }) {
           }}
           disabled={isSubmitting}
         >
-          <option value="viewer">Viewer</option>
-          <option value="member">Member</option>
-          <option value="admin">Admin</option>
+          {configRoles.length > 0 ? (
+            configRoles.map((r) => (
+              <option key={r.name} value={r.name}>
+                {r.display_name || r.name}
+              </option>
+            ))
+          ) : (
+            <>
+              <option value="viewer">Viewer</option>
+              <option value="member">Member</option>
+              <option value="admin">Admin</option>
+            </>
+          )}
         </select>
 
         <div style={{ display: "flex", gap: 12, justifyContent: 'flex-end' }}>

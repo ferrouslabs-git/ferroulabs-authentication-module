@@ -3,6 +3,7 @@ SQLAlchemy ORM models for auth module
 
 Phases:
 - Phase 2: User, Tenant, Membership, Invitation, Session models
+- v3.0: RoleDefinition, PermissionGrant, Space
 """
 from .tenant import Tenant
 from .user import User
@@ -11,6 +12,9 @@ from .invitation import Invitation
 from .session import Session
 from .refresh_token import RefreshTokenStore
 from .audit_event import AuditEvent
+from .role_definition import RoleDefinition
+from .permission_grant import PermissionGrant
+from .space import Space
 
 __all__ = [
     "Tenant",
@@ -20,4 +24,7 @@ __all__ = [
     "Session",
     "RefreshTokenStore",
     "AuditEvent",
+    "RoleDefinition",
+    "PermissionGrant",
+    "Space",
 ]

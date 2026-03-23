@@ -27,7 +27,12 @@ class Tenant(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
     
     # Relationships
-    memberships = relationship("Membership", back_populates="tenant", cascade="all, delete-orphan")
+    memberships = relationship(
+        "Membership",
+        primaryjoin="and_(Membership.scope_id == Tenant.id, Membership.scope_type == 'account')",
+        foreign_keys="[Membership.scope_id]",
+        viewonly=True,
+    )
     invitations = relationship("Invitation", back_populates="tenant", cascade="all, delete-orphan")
     
     def __repr__(self):

@@ -12,10 +12,10 @@ from ..schemas.user_management import (
     UpdateUserRoleRequest,
     UpdateUserRoleResponse,
 )
-from ..security import TenantContext, require_admin, require_member
+from ..security import ScopeContext, require_permission
 from ..services.audit_service import log_audit_event
 from ..services.user_management_service import list_tenant_users, remove_user_from_tenant, update_user_role
-from .route_helpers import ensure_tenant_access
+from .route_helpers import ensure_scope_access
 
 router = APIRouter()
 
@@ -23,11 +23,11 @@ router = APIRouter()
 @router.get("/tenants/{tenant_id}/users", response_model=List[TenantUserResponse])
 async def get_tenant_users(
     tenant_id: UUID,
-    ctx: TenantContext = Depends(require_member),
+    ctx: ScopeContext = Depends(require_permission("account:read")),
     db: Session = Depends(get_db),
 ):
     """List active users in tenant (member+)."""
-    ensure_tenant_access(tenant_id, ctx)
+    ensure_scope_access(tenant_id, ctx)
     return list_tenant_users(db, tenant_id)
 
 
@@ -36,19 +36,19 @@ async def patch_tenant_user_role(
     tenant_id: UUID,
     user_id: UUID,
     payload: UpdateUserRoleRequest,
-    ctx: TenantContext = Depends(require_admin),
+    ctx: ScopeContext = Depends(require_permission("members:manage")),
     db: Session = Depends(get_db),
 ):
     """Update user's tenant role (admin+)."""
-    ensure_tenant_access(tenant_id, ctx)
+    ensure_scope_access(tenant_id, ctx)
     try:
         membership = update_user_role(
             db,
             tenant_id,
             user_id,
             payload.role,
-            actor_role=ctx.role,
-            actor_is_platform_admin=ctx.is_platform_admin,
+            actor_role=ctx.active_roles[0] if ctx.active_roles else None,
+            actor_is_platform_admin=ctx.is_super_admin,
         )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
@@ -67,8 +67,8 @@ async def patch_tenant_user_role(
 
     return UpdateUserRoleResponse(
         user_id=membership.user_id,
-        tenant_id=membership.tenant_id,
-        role=membership.role,
+        tenant_id=tenant_id,
+        role=membership.role_name,
         message="User role updated successfully",
     )
 
@@ -77,11 +77,11 @@ async def patch_tenant_user_role(
 async def delete_tenant_user(
     tenant_id: UUID,
     user_id: UUID,
-    ctx: TenantContext = Depends(require_admin),
+    ctx: ScopeContext = Depends(require_permission("members:manage")),
     db: Session = Depends(get_db),
 ):
     """Soft-remove user from tenant (admin+)."""
-    ensure_tenant_access(tenant_id, ctx)
+    ensure_scope_access(tenant_id, ctx)
     try:
         membership = remove_user_from_tenant(db, tenant_id, user_id)
     except ValueError as exc:
@@ -101,7 +101,7 @@ async def delete_tenant_user(
 
     return RemoveUserResponse(
         user_id=membership.user_id,
-        tenant_id=membership.tenant_id,
+        tenant_id=tenant_id,
         status=membership.status,
         message="User removed from tenant",
     )

@@ -11,13 +11,16 @@ from sqlalchemy.orm import Session
 from ..models.invitation import Invitation
 from ..models.membership import Membership
 from ..models.user import User
+from .auth_config_loader import get_auth_config
 
 
-ROLE_LEVELS = {
-    "owner": 4,
-    "admin": 3,
-    "member": 2,
-    "viewer": 1,
+# Legacy role → v3 role name mapping (used to derive target_role_name from
+# the legacy 'role' API field when callers haven't migrated yet).
+_LEGACY_TO_V3 = {
+    "owner": "account_owner",
+    "admin": "account_admin",
+    "member": "account_member",
+    "viewer": "account_member",
 }
 
 
@@ -38,14 +41,21 @@ def create_invitation(
     role: str,
     created_by: UUID,
     expires_in_days: int = 2,
+    target_scope_type: str | None = None,
+    target_scope_id: UUID | None = None,
+    target_role_name: str | None = None,
 ) -> Invitation:
-    """Create a new invitation token for a user email within a tenant.
+    """Create a new invitation token for a user email within a tenant/scope.
 
     If a pending invitation already exists for the same email+tenant, revoke the
     older one so only the latest token remains active.
     
     Args:
         expires_in_days: Days until invitation expires (default 2 days = 48 hours)
+        role: Legacy role string (used to derive target_role_name if not provided)
+        target_scope_type: 'account' or 'space'. Defaults to 'account'.
+        target_scope_id: UUID of scope. Defaults to tenant_id.
+        target_role_name: v3 role name. Derived from 'role' if not provided.
     """
     normalized_email = email.lower().strip()
     now = utc_now()
@@ -59,19 +69,23 @@ def create_invitation(
     ).all()
 
     for pending in existing_pending:
-        # Revoke previous pending invites so only one active token remains.
         pending.revoked_at = now
         pending.expires_at = now
 
     raw_token = token_urlsafe(32)
+    resolved_scope_type = target_scope_type or "account"
+    resolved_scope_id = target_scope_id or tenant_id
+    resolved_role_name = target_role_name or _LEGACY_TO_V3.get(role, role)
     invitation = Invitation(
         tenant_id=tenant_id,
         email=normalized_email,
-        role=role,
         token=raw_token,
         token_hash=hash_token(raw_token),
         expires_at=now + timedelta(days=expires_in_days),
         created_by=created_by,
+        target_scope_type=resolved_scope_type,
+        target_scope_id=resolved_scope_id,
+        target_role_name=resolved_role_name,
     )
     db.add(invitation)
     db.commit()
@@ -93,7 +107,7 @@ def accept_invitation(db: Session, invitation: Invitation, user: User) -> Member
     - Invitation must not be expired
     - Invitation must not already be accepted
     - Invitation email must match current user's email
-    - Membership is created or re-activated for the invitation tenant
+    - Membership is created or re-activated for the invitation scope
     """
     if invitation.is_expired:
         raise ValueError("Invitation has expired")
@@ -107,23 +121,35 @@ def accept_invitation(db: Session, invitation: Invitation, user: User) -> Member
     if invitation.email.lower().strip() != (user.email or "").lower().strip():
         raise PermissionError("Invitation email does not match authenticated user")
 
+    # Look for existing membership in the target scope
     membership = db.query(Membership).filter(
         Membership.user_id == user.id,
-        Membership.tenant_id == invitation.tenant_id,
+        Membership.scope_type == invitation.target_scope_type,
+        Membership.scope_id == invitation.target_scope_id,
     ).first()
 
+    role_name = invitation.target_role_name
+    scope_type = invitation.target_scope_type
+    scope_id = invitation.target_scope_id
+
     if membership:
-        # Never downgrade an existing role through invitation acceptance.
-        existing_level = ROLE_LEVELS.get(membership.role, 0)
-        invited_level = ROLE_LEVELS.get(invitation.role, 0)
-        if existing_level < invited_level:
-            membership.role = invitation.role
+        # Compare permission sets: never downgrade through invitation.
+        config = get_auth_config()
+        existing_role = membership.role_name
+        existing_perms = config.permissions_for_role(existing_role)
+        invited_perms = config.permissions_for_role(role_name)
+
+        if not invited_perms.issubset(existing_perms):
+            membership.role_name = role_name
+            membership.scope_type = scope_type
+            membership.scope_id = scope_id
         membership.status = "active"
     else:
         membership = Membership(
             user_id=user.id,
-            tenant_id=invitation.tenant_id,
-            role=invitation.role,
+            scope_type=scope_type,
+            scope_id=scope_id,
+            role_name=role_name,
             status="active",
         )
         db.add(membership)

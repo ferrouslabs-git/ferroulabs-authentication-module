@@ -1,25 +1,21 @@
 from fastapi import APIRouter, Depends
 
 from ..security import (
-    TenantContext,
-    check_permission,
-    get_tenant_context,
-    require_admin,
-    require_member,
-    require_owner,
-    require_viewer,
+    ScopeContext,
+    get_scope_context,
+    require_permission,
 )
 
 router = APIRouter()
 
 
 @router.get("/admin/settings")
-async def get_admin_settings(ctx: TenantContext = Depends(require_admin)):
-    """Admin-only endpoint - requires owner or admin role."""
+async def get_admin_settings(ctx: ScopeContext = Depends(require_permission("members:manage"))):
+    """Admin-only endpoint - requires members:manage permission."""
     return {
-        "tenant_id": str(ctx.tenant_id),
+        "scope_id": str(ctx.scope_id),
         "accessed_by": str(ctx.user_id),
-        "role": ctx.role,
+        "active_roles": ctx.active_roles,
         "message": "Admin settings accessed successfully",
         "settings": {
             "max_users": 50,
@@ -30,12 +26,12 @@ async def get_admin_settings(ctx: TenantContext = Depends(require_admin)):
 
 
 @router.get("/owner/danger-zone")
-async def get_owner_settings(ctx: TenantContext = Depends(require_owner)):
-    """Owner-only endpoint - requires owner role."""
+async def get_owner_settings(ctx: ScopeContext = Depends(require_permission("account:delete"))):
+    """Owner-only endpoint - requires account:delete permission."""
     return {
-        "tenant_id": str(ctx.tenant_id),
+        "scope_id": str(ctx.scope_id),
         "accessed_by": str(ctx.user_id),
-        "role": ctx.role,
+        "active_roles": ctx.active_roles,
         "message": "Owner-only danger zone accessed",
         "available_actions": [
             "delete_tenant",
@@ -47,27 +43,27 @@ async def get_owner_settings(ctx: TenantContext = Depends(require_owner)):
 
 
 @router.get("/member/dashboard")
-async def get_member_dashboard(ctx: TenantContext = Depends(require_member)):
-    """Member-level endpoint - requires member, admin, or owner."""
+async def get_member_dashboard(ctx: ScopeContext = Depends(require_permission("data:write"))):
+    """Member-level endpoint - requires data:write permission."""
     return {
-        "tenant_id": str(ctx.tenant_id),
+        "scope_id": str(ctx.scope_id),
         "accessed_by": str(ctx.user_id),
-        "role": ctx.role,
+        "active_roles": ctx.active_roles,
         "message": "Member dashboard accessed",
         "can_create": True,
         "can_edit": True,
-        "can_delete": ctx.role in ("owner", "admin"),
+        "can_delete": ctx.has_permission("members:manage"),
         "recent_activity": [],
     }
 
 
 @router.get("/viewer/reports")
-async def get_viewer_reports(ctx: TenantContext = Depends(require_viewer)):
-    """Viewer-level endpoint - any tenant member can access."""
+async def get_viewer_reports(ctx: ScopeContext = Depends(require_permission("data:read"))):
+    """Viewer-level endpoint - any member with data:read can access."""
     return {
-        "tenant_id": str(ctx.tenant_id),
+        "scope_id": str(ctx.scope_id),
         "accessed_by": str(ctx.user_id),
-        "role": ctx.role,
+        "active_roles": ctx.active_roles,
         "message": "Reports accessed (read-only)",
         "reports": [
             {"id": 1, "name": "Monthly Summary", "type": "summary"},
@@ -77,31 +73,32 @@ async def get_viewer_reports(ctx: TenantContext = Depends(require_viewer)):
 
 
 @router.get("/permissions/check")
-async def check_user_permissions(ctx: TenantContext = Depends(get_tenant_context)):
-    """Check what permissions the current user has in this tenant."""
+async def check_user_permissions(ctx: ScopeContext = Depends(get_scope_context)):
+    """Check what permissions the current user has in this scope."""
     permissions_to_check = [
-        "tenant:delete",
-        "tenant:edit",
-        "users:create",
-        "users:edit",
-        "users:delete",
-        "settings:edit",
-        "data:create",
-        "data:edit",
-        "data:delete",
+        "account:delete",
+        "account:read",
+        "spaces:create",
+        "members:manage",
+        "members:invite",
         "data:read",
+        "data:write",
+        "space:delete",
+        "space:configure",
+        "space:read",
     ]
 
     user_permissions = {
-        permission: check_permission(ctx, permission)
+        permission: ctx.has_permission(permission)
         for permission in permissions_to_check
     }
 
     return {
-        "tenant_id": str(ctx.tenant_id),
+        "scope_type": ctx.scope_type,
+        "scope_id": str(ctx.scope_id),
         "user_id": str(ctx.user_id),
-        "role": ctx.role,
-        "is_platform_admin": ctx.is_platform_admin,
+        "active_roles": ctx.active_roles,
+        "is_super_admin": ctx.is_super_admin,
         "permissions": user_permissions,
         "message": "Permission check complete",
     }

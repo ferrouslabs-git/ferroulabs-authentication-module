@@ -7,7 +7,7 @@ from app.database import get_db
 
 from ..models.user import User
 from ..schemas.tenant import TenantCreateRequest, TenantCreateResponse, TenantListResponse
-from ..security import TenantContext, get_current_user, get_tenant_context
+from ..security import ScopeContext, get_current_user, get_scope_context
 from ..services.audit_service import log_audit_event
 from ..services.tenant_service import create_tenant, get_user_tenants
 
@@ -60,14 +60,15 @@ async def get_my_tenants(
 
 
 @router.get("/tenant-context")
-async def get_tenant_context_info(ctx: TenantContext = Depends(get_tenant_context)):
-    """Test endpoint for tenant-context middleware and role resolution."""
+async def get_tenant_context_info(ctx: ScopeContext = Depends(get_scope_context)):
+    """Test endpoint for scope/tenant-context middleware and role resolution."""
     return {
         "user_id": str(ctx.user_id),
-        "tenant_id": str(ctx.tenant_id),
-        "role": ctx.role,
-        "is_platform_admin": ctx.is_platform_admin,
-        "is_owner": ctx.is_owner(),
-        "is_admin_or_owner": ctx.is_admin_or_owner(),
+        "tenant_id": str(ctx.scope_id),
+        "scope_type": ctx.scope_type,
+        "scope_id": str(ctx.scope_id),
+        "active_roles": ctx.active_roles,
+        "role": ctx.active_roles[0] if ctx.active_roles else None,
+        "is_platform_admin": ctx.is_super_admin,
         "message": "Tenant context validated successfully",
     }

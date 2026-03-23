@@ -13,7 +13,19 @@ class InvitationCreateRequest(BaseModel):
     email: EmailStr = Field(..., description="Email address to invite")
     role: Literal["admin", "member", "viewer"] = Field(
         default="member",
-        description="Role to assign when invitation is accepted"
+        description="Legacy role to assign (backward compat)"
+    )
+    target_scope_type: str | None = Field(
+        default=None,
+        description="Scope type: 'account' or 'space'. Defaults to context scope."
+    )
+    target_scope_id: UUID | None = Field(
+        default=None,
+        description="Scope ID. Defaults to context scope_id."
+    )
+    target_role_name: str | None = Field(
+        default=None,
+        description="v3 role name (e.g. 'account_admin', 'space_member'). Defaults from 'role' field."
     )
 
 
@@ -29,6 +41,9 @@ class InvitationCreateResponse(BaseModel):
     status: Literal["pending", "accepted", "expired", "revoked"]
     email_sent: bool
     email_detail: str | None = None
+    target_scope_type: str | None = None
+    target_scope_id: UUID | None = None
+    target_role_name: str | None = None
 
 
 class InvitationPreviewResponse(BaseModel):
@@ -61,3 +76,6 @@ class InvitationAcceptResponse(BaseModel):
     tenant_id: UUID
     role: str
     message: str
+    scope_type: str | None = None
+    scope_id: UUID | None = None
+    role_name: str | None = None

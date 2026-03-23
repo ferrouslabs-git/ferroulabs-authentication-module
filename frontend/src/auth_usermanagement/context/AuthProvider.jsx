@@ -1,5 +1,5 @@
 import { createContext, useEffect, useMemo, useState, useRef } from "react";
-import { getCurrentUser, listMyTenants, registerSession, rotateSession, revokeAllSessions, storeRefreshCookie, refreshAccessToken, clearRefreshCookie, syncUser } from "../services/authApi";
+import { getCurrentUser, listMyTenants, listMySpaces, getRoleDefinitions, registerSession, rotateSession, revokeAllSessions, storeRefreshCookie, refreshAccessToken, clearRefreshCookie, syncUser } from "../services/authApi";
 import {
   clearCodeFromUrl,
   exchangeAuthCodeForTokens,
@@ -51,6 +51,10 @@ export function AuthProvider({ children }) {
   const [isLoading, setIsLoading] = useState(true);
   const [authError, setAuthError] = useState("");
   const [sessionId, setSessionId] = useState(null);
+  const [spaces, setSpaces] = useState([]);
+  const [currentSpaceId, setCurrentSpaceId] = useState(null);
+  const [roleDefinitions, setRoleDefinitions] = useState(null);
+  const [scopeContext, setScopeContext] = useState(null);
   const refreshTimerRef = useRef(null);
   const skipNextBootstrapRefreshRef = useRef(false);
 
@@ -165,6 +169,22 @@ export function AuthProvider({ children }) {
           setTenantId(firstTenant);
           writeStorage(TENANT_KEY, firstTenant);
         }
+
+        // v3.0: Fetch role definitions and spaces (best-effort)
+        try {
+          const roles = await getRoleDefinitions(token);
+          setRoleDefinitions(roles);
+        } catch (_rolesError) {
+          // Role definitions are nice-to-have; legacy fallback still works.
+        }
+
+        try {
+          const mySpaces = await listMySpaces(token);
+          setSpaces(Array.isArray(mySpaces) ? mySpaces : []);
+        } catch (_spacesError) {
+          // Spaces optional at this stage.
+        }
+
         setAuthError("");
 
         // Redirect only to safe invitation paths and clear stale values.
@@ -309,6 +329,10 @@ export function AuthProvider({ children }) {
     setUser(null);
     setTenants([]);
     setSessionId(null);
+    setSpaces([]);
+    setCurrentSpaceId(null);
+    setRoleDefinitions(null);
+    setScopeContext(null);
     setAuthError("");
     // Redirect to Cognito logout after React finishes current render
     setTimeout(() => logoutFromCognito(), 0);
@@ -318,6 +342,39 @@ export function AuthProvider({ children }) {
     setTenantId(nextTenantId);
     writeStorage(TENANT_KEY, nextTenantId);
   };
+
+  const changeSpace = (nextSpaceId) => {
+    setCurrentSpaceId(nextSpaceId);
+  };
+
+  // Build scopeContext whenever tenant, role definitions, or space changes
+  useEffect(() => {
+    if (!roleDefinitions || !tenantId) {
+      setScopeContext(null);
+      return;
+    }
+    const currentTenant = tenants.find((t) => t.id === tenantId);
+    const role = currentTenant?.role;
+    if (!role || !roleDefinitions.roles) {
+      setScopeContext(null);
+      return;
+    }
+
+    // Find the matching role definition and its permissions
+    const scopeType = currentSpaceId ? "space" : "account";
+    const layerRoles = roleDefinitions.roles?.[scopeType] || [];
+    // Try to find role by v3 name first, then by legacy name
+    const roleDef = layerRoles.find((r) => r.name === role)
+      || layerRoles.find((r) => r.name === `${scopeType}_${role}`);
+    const resolved_permissions = roleDef?.permissions || [];
+
+    setScopeContext({
+      scope_type: scopeType,
+      scope_id: currentSpaceId || tenantId,
+      role_name: roleDef?.name || role,
+      resolved_permissions,
+    });
+  }, [tenantId, tenants, roleDefinitions, currentSpaceId]);
 
   const refreshAuthState = async () => {
     if (!token) {
@@ -358,13 +415,18 @@ export function AuthProvider({ children }) {
       authError,
       isLoading,
       sessionId,
+      spaces,
+      currentSpaceId,
+      roleDefinitions,
+      scopeContext,
       isAuthenticated: Boolean(token && user),
       loginWithToken,
       logout,
       changeTenant,
+      changeSpace,
       refreshAuthState,
     }),
-    [token, user, tenants, tenantId, authError, isLoading, sessionId],
+    [token, user, tenants, tenantId, authError, isLoading, sessionId, spaces, currentSpaceId, roleDefinitions, scopeContext],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

@@ -27,6 +27,12 @@ class Settings(BaseSettings):
     frontend_url: str = os.getenv("FRONTEND_URL", "http://localhost:5173")
     cookie_secure: bool = os.getenv("COOKIE_SECURE", "true").lower() == "true"
 
+    # Auth config (v3.0)
+    auth_config_path: str = os.getenv(
+        "AUTH_CONFIG_PATH",
+        os.path.join(os.path.dirname(__file__), "auth_config.yaml"),
+    )
+
     # Portability
     auth_namespace: str = os.getenv("AUTH_NAMESPACE", "authum")
     auth_api_prefix: str = os.getenv("AUTH_API_PREFIX", "/auth")

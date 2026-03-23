@@ -50,7 +50,7 @@ def _seed_users(SessionLocal):
     )
     session.add_all([tenant, admin_user, target_user, member_user])
     session.commit()
-    session.add(Membership(user_id=member_user.id, tenant_id=tenant.id, role="member", status="active"))
+    session.add(Membership(user_id=member_user.id, scope_type="account", scope_id=tenant.id, role_name="account_member", status="active"))
     session.commit()
     session.refresh(admin_user)
     session.refresh(target_user)
@@ -137,7 +137,7 @@ def test_platform_admin_can_list_all_users(monkeypatch):
             assert member_entry["is_platform_admin"] is False
             assert len(member_entry["memberships"]) == 1
             assert member_entry["memberships"][0]["tenant_name"] == "Tenant Alpha"
-            assert member_entry["memberships"][0]["role"] == "member"
+            assert member_entry["memberships"][0]["role"] == "account_member"
     finally:
         app.dependency_overrides.clear()
         Base.metadata.drop_all(engine)

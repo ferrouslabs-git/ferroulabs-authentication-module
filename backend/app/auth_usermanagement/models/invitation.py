@@ -25,7 +25,6 @@ class Invitation(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
     tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
     email = Column(String(255), nullable=False, index=True)
-    role = Column(String(20), nullable=False)  # admin, member, viewer
     token = Column(String(255), unique=True, nullable=False, index=True)
     token_hash = Column(String(64), nullable=True, index=True)  # SHA256 hex digest
     expires_at = Column(DateTime, nullable=False)
@@ -34,13 +33,18 @@ class Invitation(Base):
     created_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"))
     
     created_at = Column(DateTime, default=utc_now, nullable=False)
-    
+
+    # Scope columns
+    target_scope_type = Column(String(20), nullable=False)
+    target_scope_id = Column(UUID(as_uuid=True), nullable=False)
+    target_role_name = Column(String(100), nullable=False)
+
     # Relationships
     tenant = relationship("Tenant", back_populates="invitations")
     creator = relationship("User", back_populates="created_invitations", foreign_keys=[created_by])
     
     def __repr__(self):
-        return f"<Invitation(email='{self.email}', tenant_id={self.tenant_id}, role='{self.role}')>"
+        return f"<Invitation(email='{self.email}', tenant_id={self.tenant_id}, role='{self.target_role_name}')>"
     
     @property
     def is_expired(self):

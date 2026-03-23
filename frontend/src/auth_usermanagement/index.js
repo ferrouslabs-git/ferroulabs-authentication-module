@@ -4,6 +4,7 @@ export { useAuth } from "./hooks/useAuth";
 export { useCurrentUser } from "./hooks/useCurrentUser";
 export { useTenant } from "./hooks/useTenant";
 export { useRole } from "./hooks/useRole";
+export { useSpace } from "./hooks/useSpace";
 
 export { LoginForm } from "./components/LoginForm";
 export { ProtectedRoute } from "./components/ProtectedRoute";

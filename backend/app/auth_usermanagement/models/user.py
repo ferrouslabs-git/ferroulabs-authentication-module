@@ -29,7 +29,8 @@ class User(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
     
     # Relationships
-    memberships = relationship("Membership", back_populates="user", cascade="all, delete-orphan")
+    memberships = relationship("Membership", back_populates="user", cascade="all, delete-orphan",
+                               foreign_keys="Membership.user_id")
     sessions = relationship("Session", back_populates="user", cascade="all, delete-orphan")
     created_invitations = relationship("Invitation", back_populates="creator", foreign_keys="Invitation.created_by")
     

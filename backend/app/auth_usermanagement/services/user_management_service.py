@@ -11,7 +11,8 @@ from ..models.user import User
 
 def list_tenant_users(db: Session, tenant_id: UUID) -> list[dict]:
     memberships = db.query(Membership).filter(
-        Membership.tenant_id == tenant_id,
+        Membership.scope_type == "account",
+        Membership.scope_id == tenant_id,
         Membership.status == "active",
     ).all()
 
@@ -20,7 +21,7 @@ def list_tenant_users(db: Session, tenant_id: UUID) -> list[dict]:
             "user_id": m.user.id,
             "email": m.user.email,
             "name": m.user.name,
-            "role": m.role,
+            "role": m.role_name,
             "status": m.status,
             "is_active": m.user.is_active,
             "joined_at": m.created_at,
@@ -31,7 +32,7 @@ def list_tenant_users(db: Session, tenant_id: UUID) -> list[dict]:
 
 def list_platform_users(db: Session) -> list[dict]:
     users = db.query(User).options(
-        selectinload(User.memberships).selectinload(Membership.tenant)
+        selectinload(User.memberships)
     ).order_by(User.email.asc()).all()
 
     return [
@@ -46,18 +47,17 @@ def list_platform_users(db: Session) -> list[dict]:
             "updated_at": user.updated_at,
             "memberships": [
                 {
-                    "tenant_id": membership.tenant_id,
-                    "tenant_name": membership.tenant.name,
-                    "role": membership.role,
+                    "tenant_id": membership.scope_id if membership.scope_type == "account" else None,
+                    "tenant_name": membership.tenant.name if membership.tenant else None,
+                    "role": membership.role_name,
+                    "scope_type": membership.scope_type,
+                    "scope_id": membership.scope_id,
                     "status": membership.status,
                     "joined_at": membership.created_at,
                 }
                 for membership in sorted(
                     user.memberships,
-                    key=lambda current_membership: (
-                        current_membership.tenant.name.lower(),
-                        current_membership.created_at,
-                    ),
+                    key=lambda m: m.created_at,
                 )
             ],
         }
@@ -74,7 +74,8 @@ def update_user_role(
     actor_is_platform_admin: bool = False,
 ) -> Membership | None:
     membership = db.query(Membership).filter(
-        Membership.tenant_id == tenant_id,
+        Membership.scope_type == "account",
+        Membership.scope_id == tenant_id,
         Membership.user_id == user_id,
         Membership.status == "active",
     ).first()
@@ -82,24 +83,28 @@ def update_user_role(
     if not membership:
         return None
 
+    current_role = membership.role_name
+
     if not actor_is_platform_admin:
-        if actor_role == "admin":
-            if membership.role == "owner":
+        actor_effective = actor_role or ""
+        if actor_effective in ("admin", "account_admin"):
+            if current_role in ("owner", "account_owner"):
                 raise ValueError("Admins cannot modify owner roles")
-            if new_role in {"owner", "admin"}:
+            if new_role in {"owner", "admin", "account_owner", "account_admin"}:
                 raise ValueError("Admins can only assign member or viewer roles")
 
-    # Prevent removing the last owner.
-    if membership.role == "owner" and new_role != "owner":
+    # Prevent removing the last owner / account_owner.
+    if current_role in ("owner", "account_owner") and new_role not in ("owner", "account_owner"):
         owner_count = db.query(Membership).filter(
-            Membership.tenant_id == tenant_id,
-            Membership.role == "owner",
+            Membership.scope_type == "account",
+            Membership.scope_id == tenant_id,
             Membership.status == "active",
+            Membership.role_name.in_(["account_owner", "owner"]),
         ).count()
         if owner_count <= 1:
             raise ValueError("Cannot remove last owner")
 
-    membership.role = new_role
+    membership.role_name = new_role
     db.commit()
     db.refresh(membership)
     return membership
@@ -107,7 +112,8 @@ def update_user_role(
 
 def remove_user_from_tenant(db: Session, tenant_id: UUID, user_id: UUID) -> Membership | None:
     membership = db.query(Membership).filter(
-        Membership.tenant_id == tenant_id,
+        Membership.scope_type == "account",
+        Membership.scope_id == tenant_id,
         Membership.user_id == user_id,
         Membership.status == "active",
     ).first()
@@ -115,12 +121,15 @@ def remove_user_from_tenant(db: Session, tenant_id: UUID, user_id: UUID) -> Memb
     if not membership:
         return None
 
-    # Prevent removing the last owner.
-    if membership.role == "owner":
+    current_role = membership.role_name
+
+    # Prevent removing the last owner / account_owner.
+    if current_role in ("owner", "account_owner"):
         owner_count = db.query(Membership).filter(
-            Membership.tenant_id == tenant_id,
-            Membership.role == "owner",
+            Membership.scope_type == "account",
+            Membership.scope_id == tenant_id,
             Membership.status == "active",
+            Membership.role_name.in_(["account_owner", "owner"]),
         ).count()
         if owner_count <= 1:
             raise ValueError("Cannot remove last owner")

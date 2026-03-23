@@ -3,9 +3,12 @@
  * 
  * These permissions align with backend role definitions and should be used
  * consistently across all components for permission checks.
+ * 
+ * v3.0: Backend uses permission strings like "members:invite", "account:read".
+ * The BACKEND_PERMISSIONS map provides the canonical mapping.
  */
 
-// User management permissions
+// Legacy frontend permission identifiers (still used by checkPermission)
 export const PERMISSIONS = {
   // Tenant user management
   INVITE_USERS: 'invite_users',
@@ -18,6 +21,23 @@ export const PERMISSIONS = {
   MANAGE_TENANTS: 'manage_tenants',
   SUSPEND_ACCOUNTS: 'suspend_accounts',
   VIEW_ALL_USERS: 'view_all_users',
+};
+
+// v3.0 backend permission strings (from auth_config.yaml)
+export const BACKEND_PERMISSIONS = {
+  ACCOUNT_DELETE: "account:delete",
+  ACCOUNT_READ: "account:read",
+  SPACES_CREATE: "spaces:create",
+  MEMBERS_MANAGE: "members:manage",
+  MEMBERS_INVITE: "members:invite",
+  SPACE_DELETE: "space:delete",
+  SPACE_CONFIGURE: "space:configure",
+  SPACE_READ: "space:read",
+  DATA_READ: "data:read",
+  DATA_WRITE: "data:write",
+  PLATFORM_CONFIGURE: "platform:configure",
+  ACCOUNTS_MANAGE: "accounts:manage",
+  USERS_SUSPEND: "users:suspend",
 };
 
 // Role definitions with their permissions

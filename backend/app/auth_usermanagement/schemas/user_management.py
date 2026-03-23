@@ -19,11 +19,13 @@ class TenantUserResponse(BaseModel):
 
 
 class PlatformUserMembershipResponse(BaseModel):
-    tenant_id: UUID
-    tenant_name: str
+    tenant_id: UUID | None = None
+    tenant_name: str | None = None
     role: str
     status: str
     joined_at: datetime
+    scope_type: str | None = None
+    scope_id: UUID | None = None
 
 
 class PlatformUserResponse(BaseModel):

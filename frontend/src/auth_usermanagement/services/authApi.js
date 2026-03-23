@@ -6,8 +6,12 @@ const api = axios.create({
   timeout: 15000,
 });
 
-function authHeaders(token, tenantId) {
+function authHeaders(token, tenantId, { scopeType, scopeId } = {}) {
   const headers = { Authorization: `Bearer ${token}` };
+  if (scopeType && scopeId) {
+    headers["X-Scope-Type"] = scopeType;
+    headers["X-Scope-ID"] = scopeId;
+  }
   if (tenantId) {
     headers["X-Tenant-ID"] = tenantId;
   }
@@ -80,11 +84,15 @@ export async function removeTenantUser(token, tenantId, userId) {
   return res.data;
 }
 
-export async function inviteTenantUser(token, tenantId, email, role) {
+export async function inviteTenantUser(token, tenantId, email, role, { scopeType, scopeId, targetRoleName } = {}) {
+  const body = { email, role };
+  if (targetRoleName) body.target_role_name = targetRoleName;
+  if (scopeType) body.target_scope_type = scopeType;
+  if (scopeId) body.target_scope_id = scopeId;
   const res = await api.post(
     "/invite",
-    { email, role },
-    { headers: authHeaders(token, tenantId) },
+    body,
+    { headers: authHeaders(token, tenantId, { scopeType: scopeType || "account", scopeId: scopeId || tenantId }) },
   );
   return res.data;
 }
@@ -199,6 +207,41 @@ export async function acceptInvitation(authToken, inviteToken) {
     { token: inviteToken },
     { headers: authHeaders(authToken) }
   );
+  return res.data;
+}
+
+// ── v3.0 scope-aware endpoints ──────────────────────────────────
+
+export async function getRoleDefinitions(token) {
+  const res = await api.get("/config/roles", { headers: authHeaders(token) });
+  return res.data;
+}
+
+export async function listMySpaces(token) {
+  const res = await api.get("/spaces/my", { headers: authHeaders(token) });
+  return res.data;
+}
+
+export async function getAccountSpaces(token, accountId) {
+  const res = await api.get(`/accounts/${accountId}/spaces`, {
+    headers: authHeaders(token, accountId, { scopeType: "account", scopeId: accountId }),
+  });
+  return res.data;
+}
+
+export async function inviteToSpace(token, spaceId, data, tenantId) {
+  const res = await api.post(
+    `/spaces/${spaceId}/invite`,
+    data,
+    { headers: authHeaders(token, tenantId, { scopeType: "space", scopeId: spaceId }) },
+  );
+  return res.data;
+}
+
+export async function getAccountMembers(token, accountId) {
+  const res = await api.get(`/tenants/${accountId}/users`, {
+    headers: authHeaders(token, accountId, { scopeType: "account", scopeId: accountId }),
+  });
   return res.data;
 }
 

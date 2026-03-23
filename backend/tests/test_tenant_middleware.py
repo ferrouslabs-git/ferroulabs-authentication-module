@@ -111,8 +111,9 @@ def test_cross_tenant_access_blocked_at_api_level(monkeypatch):
     session.add(
         Membership(
             user_id=user.id,
-            tenant_id=tenant_a.id,
-            role="owner",
+            scope_type="account",
+            scope_id=tenant_a.id,
+            role_name="account_owner",
             status="active",
         )
     )

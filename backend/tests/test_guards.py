@@ -27,7 +27,7 @@ def test_require_admin_blocks_member():
         require_admin(_ctx("member"))
 
     assert exc.value.status_code == 403
-    assert "Required role" in str(exc.value.detail)
+    assert "permission" in str(exc.value.detail).lower() or "role" in str(exc.value.detail).lower()
 
 
 def test_require_admin_allows_platform_admin_regardless_of_role():

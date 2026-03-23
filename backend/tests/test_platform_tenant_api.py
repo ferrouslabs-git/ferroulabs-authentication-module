@@ -49,9 +49,9 @@ def _seed_users_and_tenant(SessionLocal):
     session.commit()
 
     session.add_all([
-        Membership(user_id=platform_admin.id, tenant_id=tenant.id, role="owner", status="active"),
-        Membership(user_id=regular_user.id, tenant_id=tenant.id, role="member", status="active"),
-        Membership(user_id=regular_user.id, tenant_id=second_tenant.id, role="viewer", status="removed"),
+        Membership(user_id=platform_admin.id, scope_type="account", scope_id=tenant.id, role_name="account_owner", status="active"),
+        Membership(user_id=regular_user.id, scope_type="account", scope_id=tenant.id, role_name="account_member", status="active"),
+        Membership(user_id=regular_user.id, scope_type="account", scope_id=second_tenant.id, role_name="account_member", status="removed"),
     ])
     session.commit()
 

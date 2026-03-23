@@ -14,7 +14,7 @@ from ..schemas.invitation import (
     InvitationPreviewResponse,
     InvitationRevokeResponse,
 )
-from ..security import TenantContext, get_current_user, require_admin
+from ..security import ScopeContext, get_current_user, require_permission
 from ..services.audit_service import log_audit_event
 from ..services.invitation_service import (
     accept_invitation,
@@ -22,7 +22,7 @@ from ..services.invitation_service import (
     get_tenant_invitation_by_token,
     revoke_invitation,
 )
-from .route_helpers import create_invitation_response, ensure_tenant_access
+from .route_helpers import create_invitation_response, ensure_scope_access
 
 router = APIRouter()
 
@@ -30,25 +30,25 @@ router = APIRouter()
 @router.post("/invite", response_model=InvitationCreateResponse)
 async def invite_user_to_tenant(
     invite_data: InvitationCreateRequest,
-    ctx: TenantContext = Depends(require_admin),
+    ctx: ScopeContext = Depends(require_permission("members:invite")),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Create an invitation for a user to join the current tenant."""
-    return await create_invitation_response(db, ctx.tenant_id, invite_data, current_user)
+    """Create an invitation for a user to join the current scope."""
+    return await create_invitation_response(db, ctx.scope_id, invite_data, current_user, ctx)
 
 
 @router.post("/tenants/{tenant_id}/invite", response_model=InvitationCreateResponse)
 async def invite_user_to_explicit_tenant(
     tenant_id: UUID,
     invite_data: InvitationCreateRequest,
-    ctx: TenantContext = Depends(require_admin),
+    ctx: ScopeContext = Depends(require_permission("members:invite")),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """Create an invitation using explicit tenant path parameter."""
-    ensure_tenant_access(tenant_id, ctx)
-    return await create_invitation_response(db, tenant_id, invite_data, current_user)
+    ensure_scope_access(tenant_id, ctx)
+    return await create_invitation_response(db, tenant_id, invite_data, current_user, ctx)
 
 
 @router.get("/invites/{token}", response_model=InvitationPreviewResponse)
@@ -63,7 +63,7 @@ async def preview_invitation(token: str, db: Session = Depends(get_db)):
         tenant_id=invitation.tenant_id,
         tenant_name=invitation.tenant.name,
         email=invitation.email,
-        role=invitation.role,
+        role=invitation.target_role_name,
         expires_at=invitation.expires_at,
         status=invitation.status,
         is_expired=invitation.is_expired,
@@ -75,12 +75,12 @@ async def preview_invitation(token: str, db: Session = Depends(get_db)):
 async def revoke_tenant_invitation(
     tenant_id: UUID,
     token: str,
-    ctx: TenantContext = Depends(require_admin),
+    ctx: ScopeContext = Depends(require_permission("members:invite")),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """Revoke a pending invitation token for a tenant (admin+)."""
-    ensure_tenant_access(tenant_id, ctx)
+    ensure_scope_access(tenant_id, ctx)
     invitation = get_tenant_invitation_by_token(db, tenant_id, token)
     if not invitation:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invitation not found")
@@ -129,13 +129,16 @@ async def accept_invitation_token(
         "invitation_accepted",
         actor_user_id=str(current_user.id),
         db=db,
-        tenant_id=str(membership.tenant_id),
+        tenant_id=str(invitation.tenant_id),
         invitation_id=str(invitation.id),
-        role=membership.role,
+        role=membership.role_name,
     )
 
     return InvitationAcceptResponse(
-        tenant_id=membership.tenant_id,
-        role=membership.role,
+        tenant_id=invitation.tenant_id,
+        role=membership.role_name,
         message="Invitation accepted successfully",
+        scope_type=membership.scope_type,
+        scope_id=membership.scope_id,
+        role_name=membership.role_name,
     )

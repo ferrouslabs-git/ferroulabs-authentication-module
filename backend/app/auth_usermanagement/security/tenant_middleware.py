@@ -1,11 +1,11 @@
-"""Tenant Context Middleware request prechecks for protected auth routes.
+"""Scope / Tenant Context Middleware request prechecks for protected auth routes.
 
 This middleware:
-1. Enforces presence and format of X-Tenant-ID on protected routes
+1. Enforces presence of scope headers (X-Scope-Type + X-Scope-ID) or X-Tenant-ID
 2. Enforces Bearer Authorization header presence
-3. Stores requested tenant ID on request.state
+3. Stores requested scope type/id and tenant ID on request.state
 
-Tenant membership validation and tenant context creation are intentionally
+Tenant/scope membership validation and context creation are intentionally
 handled in dependency flow using the same request-scoped DB session as handlers.
 """
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -50,6 +50,11 @@ class TenantContextMiddleware(BaseHTTPMiddleware):
             f"{self.auth_prefix}/me",
             f"{self.auth_prefix}/tenants",
             f"{self.auth_prefix}/tenants/my",
+            f"{self.auth_prefix}/accounts",
+            f"{self.auth_prefix}/spaces",
+            f"{self.auth_prefix}/spaces/my",
+            f"{self.auth_prefix}/config/roles",
+            f"{self.auth_prefix}/config/permissions",
         }
 
     @staticmethod
@@ -67,31 +72,45 @@ class TenantContextMiddleware(BaseHTTPMiddleware):
         # Skip middleware for public/tenant-agnostic routes
         if self._should_skip_middleware(request):
             return await call_next(request)
-        
-        # Get tenant ID from header
+
+        # ── Scope header resolution (v3.0) ───────────────────────────
+        scope_type = request.headers.get("X-Scope-Type")
+        scope_id_str = request.headers.get("X-Scope-ID")
         tenant_id_str = request.headers.get("X-Tenant-ID")
-        
-        if not tenant_id_str:
+
+        # Fallback: X-Tenant-ID → account scope
+        if not scope_type and tenant_id_str:
+            scope_type = "account"
+            scope_id_str = tenant_id_str
+
+        if not scope_type or not scope_id_str:
             return JSONResponse(
                 status_code=400,
                 content={
                     "detail": "X-Tenant-ID header required",
-                    "hint": "Pass tenant UUID in X-Tenant-ID header"
+                    "hint": "Pass tenant UUID in X-Tenant-ID header, or use X-Scope-Type + X-Scope-ID"
                 }
             )
-        
+
+        # Validate scope type
+        if scope_type not in ("account", "space"):
+            return JSONResponse(
+                status_code=400,
+                content={"detail": f"Invalid X-Scope-Type: '{scope_type}'. Must be 'account' or 'space'."}
+            )
+
         # Validate UUID format
         try:
-            tenant_id = UUID(tenant_id_str)
+            scope_id = UUID(scope_id_str)
         except ValueError:
             return JSONResponse(
                 status_code=400,
-                content={"detail": "Invalid X-Tenant-ID format. Must be a valid UUID"}
+                content={"detail": "Invalid scope ID format. Must be a valid UUID"}
             )
-        
+
         # Ensure auth header is present and has Bearer scheme.
         auth_header = request.headers.get("Authorization", "")
-        
+
         if not auth_header.startswith("Bearer "):
             return JSONResponse(
                 status_code=401,
@@ -99,9 +118,11 @@ class TenantContextMiddleware(BaseHTTPMiddleware):
             )
 
         # Middleware intentionally does not create DB sessions.
-        # Tenant membership validation and context creation happen in dependencies
-        # using the same request-scoped DB session as endpoint handlers.
-        request.state.requested_tenant_id = tenant_id
+        # Membership validation and context creation happen in dependencies.
+        request.state.requested_scope_type = scope_type
+        request.state.requested_scope_id = scope_id
+        # Backward compat: keep requested_tenant_id for legacy code
+        request.state.requested_tenant_id = scope_id
 
         return await call_next(request)
     
