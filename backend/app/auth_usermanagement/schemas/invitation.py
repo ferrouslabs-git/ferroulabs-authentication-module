@@ -66,6 +66,19 @@ class InvitationRevokeResponse(BaseModel):
     message: str
 
 
+class InvitationResendResponse(BaseModel):
+    """Response schema for resent invitation."""
+    invitation_id: UUID
+    tenant_id: UUID
+    email: EmailStr
+    token: str
+    expires_at: datetime
+    message: str
+    status: Literal["pending", "accepted", "expired", "revoked"]
+    email_sent: bool
+    email_detail: str | None = None
+
+
 class InvitationAcceptRequest(BaseModel):
     """Request schema for accepting an invitation."""
     token: str = Field(..., min_length=20, description="Invitation token")

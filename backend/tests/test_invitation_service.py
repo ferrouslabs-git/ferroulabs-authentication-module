@@ -10,6 +10,7 @@ from app.auth_usermanagement.models.membership import Membership
 from app.auth_usermanagement.services.invitation_service import (
     accept_invitation,
     create_invitation,
+    resend_invitation,
     revoke_invitation,
 )
 
@@ -329,3 +330,63 @@ def test_create_invitation_token_is_unique():
     assert tok1 != tok2
     assert inv1.token_hash != inv2.token_hash
     assert inv1.token == inv1.token_hash  # DB stores hash, not plaintext
+
+
+# ── Resend invitation ───────────────────────────────────────────
+
+
+def test_resend_invitation_generates_new_token_and_extends_expiry():
+    db = _FakeSession()
+    invitation = _invitation(days=1)
+    old_token = invitation.token
+    old_expiry = invitation.expires_at
+
+    result, raw_token = resend_invitation(db, invitation, expires_in_days=5)
+
+    assert result is invitation
+    assert raw_token  # new raw token returned
+    assert invitation.token != old_token  # token replaced
+    assert invitation.token_hash == invitation.token  # both columns updated
+    assert invitation.expires_at > old_expiry  # expiry extended
+    assert db.commits == 1
+
+
+def test_resend_invitation_works_on_expired_invitation():
+    db = _FakeSession()
+    invitation = _invitation(days=-1)  # already expired
+    assert invitation.is_expired
+
+    result, raw_token = resend_invitation(db, invitation, expires_in_days=3)
+
+    assert not result.is_expired  # no longer expired
+    assert raw_token
+    assert db.commits == 1
+
+
+def test_resend_invitation_rejects_accepted_invitation():
+    db = _FakeSession()
+    invitation = _invitation(accepted=True)
+
+    with pytest.raises(ValueError, match="cannot be resent"):
+        resend_invitation(db, invitation)
+
+
+def test_resend_invitation_rejects_revoked_invitation():
+    db = _FakeSession()
+    invitation = _invitation()
+    invitation.revoked_at = datetime.utcnow()
+
+    with pytest.raises(ValueError, match="cannot be resent"):
+        resend_invitation(db, invitation)
+
+
+def test_resend_invitation_invalidates_old_token():
+    db = _FakeSession()
+    invitation = _invitation()
+    old_hash = invitation.token_hash
+
+    _, new_raw = resend_invitation(db, invitation)
+
+    from app.auth_usermanagement.services.invitation_service import hash_token
+    assert invitation.token_hash == hash_token(new_raw)
+    assert invitation.token_hash != old_hash

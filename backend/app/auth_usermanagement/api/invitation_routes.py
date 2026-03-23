@@ -6,20 +6,24 @@ from sqlalchemy.orm import Session
 from ..database import get_db
 
 from ..models.user import User
+from ..config import get_settings
 from ..schemas.invitation import (
     InvitationAcceptRequest,
     InvitationAcceptResponse,
     InvitationCreateRequest,
     InvitationCreateResponse,
     InvitationPreviewResponse,
+    InvitationResendResponse,
     InvitationRevokeResponse,
 )
 from ..security import ScopeContext, get_current_user, require_permission
 from ..services.audit_service import log_audit_event
+from ..services.email_service import send_invitation_email
 from ..services.invitation_service import (
     accept_invitation,
     get_invitation_by_token,
     get_tenant_invitation_by_token,
+    resend_invitation,
     revoke_invitation,
 )
 from .route_helpers import create_invitation_response, ensure_scope_access
@@ -104,6 +108,60 @@ async def revoke_tenant_invitation(
         tenant_id=invitation.tenant_id,
         status="revoked",
         message="Invitation revoked successfully",
+    )
+
+
+@router.post("/tenants/{tenant_id}/invites/{token}/resend", response_model=InvitationResendResponse)
+async def resend_tenant_invitation(
+    tenant_id: UUID,
+    token: str,
+    ctx: ScopeContext = Depends(require_permission("members:invite")),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Resend a pending or expired invitation with a fresh token and email."""
+    ensure_scope_access(tenant_id, ctx)
+    invitation = get_tenant_invitation_by_token(db, tenant_id, token)
+    if not invitation:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invitation not found")
+
+    try:
+        invitation, raw_token = resend_invitation(db, invitation)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    settings = get_settings()
+    invite_url = f"{settings.frontend_url}/invite/{raw_token}"
+    email_result = await send_invitation_email(
+        to_email=invitation.email,
+        invite_url=invite_url,
+        tenant_name=invitation.tenant.name,
+    )
+
+    log_audit_event(
+        "invitation_resent",
+        actor_user_id=str(current_user.id),
+        db=db,
+        tenant_id=str(tenant_id),
+        invitation_id=str(invitation.id),
+        invited_email=invitation.email,
+        email_sent=email_result.sent,
+    )
+
+    message = "Invitation resent successfully"
+    if not email_result.sent:
+        message = f"Invitation renewed; email not sent ({email_result.detail})"
+
+    return InvitationResendResponse(
+        invitation_id=invitation.id,
+        tenant_id=invitation.tenant_id,
+        email=invitation.email,
+        token=raw_token,
+        expires_at=invitation.expires_at,
+        message=message,
+        status=invitation.status,
+        email_sent=email_result.sent,
+        email_detail=email_result.detail,
     )
 
 

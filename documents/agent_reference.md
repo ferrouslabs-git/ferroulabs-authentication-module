@@ -14,7 +14,7 @@
 - **ORM**: SQLAlchemy 2.0
 - **Permission Model**: YAML-driven roles → resolved permission strings
 - **Frontend**: React (hooks + context), Vite bundler
-- **Tests**: 261 backend (SQLite) + 56 frontend
+- **Tests**: 266 backend (SQLite) + 56 frontend
 
 ---
 
@@ -243,6 +243,120 @@ When `scope_type=space`, the system checks parent account memberships:
 
 ---
 
+## 4a. Scope Mapping Guide — Adapting the Module to Any Application
+
+This module ships with a generic three-layer scope hierarchy:
+
+```
+platform  →  account  →  space
+```
+
+These are abstract containers. **Every host application relabels them** to match its own domain language. No code changes, migrations, or new tables are needed — you only edit display names and trim unused roles in `auth_config.yaml`.
+
+### How the Three Layers Work
+
+| Layer | What It Represents | Who Lives Here |
+|---|---|---|
+| **platform** | The entire SaaS instance | Super Admin — manages all accounts, can suspend users/accounts |
+| **account** | A top-level organizational unit (a portfolio, company, workspace, etc.) | The account owner and any account-level roles |
+| **space** | A sub-grouping inside an account | End-user roles that operate on data inside this grouping |
+
+The layer names `account` and `space` are internal identifiers stored in `memberships.scope_type`. The user-facing labels come from `auth_config.yaml → layers → display_name`.
+
+### Inheritance Rule
+
+When a user accesses a **space**, the system automatically checks their **parent account** membership and promotes their effective role:
+
+| Account Role | Inherited Space Role |
+|---|---|
+| `account_owner` | `space_admin` (full access to every space in the account) |
+| `account_admin` | `space_member` |
+| `account_member` | configurable via `inheritance.account_member_space_access` (default: `none`) |
+
+This is implemented in `security/dependencies.py → _resolve_space_inheritance()` using the `_ACCOUNT_SPACE_INHERITANCE` dict.
+
+**Key consequence**: an `account_owner` never needs an explicit space membership — they automatically have `space_admin` in every child space.
+
+### Mapping Steps for a New Application
+
+1. **Identify your role hierarchy.** List every role in your app from most-privileged to least.
+
+2. **Split into three tiers:**
+   - **Platform tier** — god-mode admin(s) that manage the whole system. Maps to `super_admin`.
+   - **Account tier** — the highest real-user scope. This is typically whoever "owns" a client, portfolio, workspace, or company. Maps to `account_owner` (and optionally `account_admin`, `account_member`).
+   - **Space tier** — the scope where everyday work happens. Maps to `space_admin`, `space_member`, `space_viewer` (pick whichever subset you need).
+
+3. **Update `auth_config.yaml`:**
+   - Change `layers.account.display_name` and `layers.space.display_name` to match your domain language.
+   - Remove any roles you don't need (e.g., if you only need `account_owner`, drop `account_admin` and `account_member`).
+   - Add or remove permission strings per role as needed.
+   - Adjust `inheritance.account_member_space_access` if needed.
+
+4. **No backend code changes required.** The scope resolution, membership queries, permission guards, and inheritance logic all read from the YAML.
+
+5. **Frontend:** Update `TenantSwitcher` labels and any UI copy to use your domain's terminology (e.g. "Organization" instead of "Space").
+
+### Concrete Example — TrustOS
+
+TrustOS has four roles: Super Admin, Consultant, Org Admin, Viewer.
+
+**Step 1 — Identify the hierarchy:**
+```
+Super Admin  →  manages everything
+Consultant   →  owns a portfolio of organizations
+Org Admin    →  manages one organization
+Viewer       →  read-only access to one organization
+```
+
+**Step 2 — Map to the three layers:**
+
+| TrustOS Role | Module Layer | Module Role | Why |
+|---|---|---|---|
+| Super Admin | platform | `super_admin` | System-wide management |
+| Consultant | account | `account_owner` | Owns a portfolio (account). Inheritance gives automatic `space_admin` in every org under the portfolio |
+| Org Admin | space | `space_admin` | Full control within a single organization |
+| Viewer | space | `space_viewer` | Read-only access within a single organization |
+
+**Step 3 — YAML changes:**
+```yaml
+layers:
+  account: { enabled: true, display_name: "Portfolio" }
+  space:   { enabled: true, display_name: "Organization" }
+roles:
+  platform:
+    - name: super_admin
+      permissions: [platform:configure, accounts:manage, users:suspend]
+  account:
+    - name: account_owner
+      display_name: "Consultant"
+      permissions: [account:delete, account:read, spaces:create, members:manage, members:invite]
+  space:
+    - name: space_admin
+      display_name: "Org Admin"
+      permissions: [space:delete, space:configure, space:read, members:manage, members:invite, data:read, data:write]
+    - name: space_viewer
+      display_name: "Viewer"
+      permissions: [space:read, data:read]
+```
+
+Roles removed (not needed by TrustOS): `account_admin`, `account_member`, `space_member`.
+
+**Result:** A Consultant creates a portfolio (account), then creates Organizations (spaces) inside it. Because `account_owner → space_admin` inheritance, the Consultant automatically has full admin access to every Organization in their portfolio — without needing individual space memberships.
+
+### What About Two-Layer Apps?
+
+If your app has no sub-grouping (e.g., just "Admin" and "Member" inside a company):
+
+```yaml
+layers:
+  account: { enabled: true, display_name: "Company" }
+  space:   { enabled: false }
+```
+
+Set `space.enabled: false`. All roles live at the account layer. The space tables and logic remain dormant.
+
+---
+
 ## 5. Request Lifecycle
 
 ```
@@ -307,6 +421,7 @@ create_invitation(db, tenant_id, email, role, created_by, expires_in_days=2, tar
 get_invitation_by_token(db: Session, token: str) -> Invitation | None
 accept_invitation(db: Session, invitation: Invitation, user: User) -> Membership
 get_tenant_invitation_by_token(db: Session, tenant_id: UUID, token: str) -> Invitation | None
+resend_invitation(db: Session, invitation: Invitation, expires_in_days: int = 2) -> tuple[Invitation, str]  # generates fresh token, extends expiry
 revoke_invitation(db: Session, invitation: Invitation) -> Invitation
 ```
 
@@ -529,6 +644,7 @@ All prefixed with `AUTH_API_PREFIX` (default: `/auth`).
 | `PATCH` | `/tenants/{id}/users/{uid}/role` | `members:manage` | Change member role |
 | `DELETE` | `/tenants/{id}/users/{uid}` | `members:manage` | Remove member |
 | `POST` | `/invite` | `members:invite` | Send invitation |
+| `POST` | `/tenants/{id}/invites/{token}/resend` | `members:invite` | Resend invitation (fresh token + email) |
 | `DELETE` | `/invites/{token}` | `members:invite` | Revoke invitation |
 | `GET` | `/sessions` | — | List user sessions |
 | `DELETE` | `/sessions/{id}` | — | Revoke session |

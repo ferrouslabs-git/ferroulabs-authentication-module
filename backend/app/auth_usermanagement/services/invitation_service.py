@@ -176,6 +176,40 @@ def get_tenant_invitation_by_token(db: Session, tenant_id: UUID, token: str) -> 
     ).first()
 
 
+def resend_invitation(
+    db: Session,
+    invitation: Invitation,
+    expires_in_days: int = 2,
+) -> tuple["Invitation", str]:
+    """Resend a pending or expired invitation by generating a fresh token.
+
+    Rules:
+    - Invitation must not be accepted
+    - Invitation must not be revoked
+    - A new token replaces the old one (old links become invalid)
+    - expires_at is reset to a fresh window
+
+    Returns:
+        Tuple of (invitation, raw_token).
+    """
+    if invitation.is_accepted:
+        raise ValueError("Accepted invitations cannot be resent")
+    if invitation.is_revoked:
+        raise ValueError("Revoked invitations cannot be resent")
+
+    now = utc_now()
+    raw_token = token_urlsafe(32)
+    hashed = hash_token(raw_token)
+
+    invitation.token = hashed
+    invitation.token_hash = hashed
+    invitation.expires_at = now + timedelta(days=expires_in_days)
+
+    db.commit()
+    db.refresh(invitation)
+    return invitation, raw_token
+
+
 def revoke_invitation(db: Session, invitation: Invitation) -> Invitation:
     """Mark a pending invitation as revoked."""
     if invitation.is_accepted:
