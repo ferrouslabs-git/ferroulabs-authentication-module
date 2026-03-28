@@ -168,5 +168,9 @@ class TenantContextMiddleware(BaseHTTPMiddleware):
         # Platform-admin routes are global and not tenant-header scoped.
         if path.startswith(f"{self.auth_prefix}/platform/"):
             return True
+
+        # Custom UI auth routes are pre-authentication; no tenant context yet.
+        if path.startswith(f"{self.auth_prefix}/custom/"):
+            return True
         
         return False

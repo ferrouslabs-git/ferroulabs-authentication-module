@@ -3,12 +3,17 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import { getInvitationDetails, acceptInvitation } from '../services/authApi';
 import { LoginForm } from './LoginForm';
-import { STORAGE_KEYS, isBrowser } from '../config';
+import { AUTH_CONFIG, STORAGE_KEYS, isBrowser } from '../config';
+
+// Lazy-load custom UI components — only imported when auth mode requires them.
+const CustomLoginForm = React.lazy(() => import('./CustomLoginForm').then(m => ({ default: m.CustomLoginForm })));
+const InviteSetPassword = React.lazy(() => import('./InviteSetPassword').then(m => ({ default: m.InviteSetPassword })));
 
 export function AcceptInvitation() {
   const { token } = useParams();
-  const { user, token: authToken, refreshAuthState } = useAuth();
+  const { user, token: authToken, refreshAuthState, loginWithTokens } = useAuth();
   const navigate = useNavigate();
+  const isCustomUI = AUTH_CONFIG.authMode === "custom_ui";
   
   const [invitation, setInvitation] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -131,12 +136,25 @@ export function AcceptInvitation() {
               Email: {invitation?.email}
             </p>
           </div>
-          <p style={styles.instruction}>Please sign in to accept this invitation:</p>
-          <LoginForm 
-            onSuccess={() => {
-              // After login, the component will re-render with user set
-            }}
-          />
+          {isCustomUI ? (
+            <React.Suspense fallback={<div>Loading...</div>}>
+              <InviteSetPassword
+                email={invitation?.email}
+                onSuccess={async (tokens) => {
+                  await loginWithTokens(tokens);
+                }}
+              />
+            </React.Suspense>
+          ) : (
+            <>
+              <p style={styles.instruction}>Please sign in to accept this invitation:</p>
+              <LoginForm 
+                onSuccess={() => {
+                  // After login, the component will re-render with user set
+                }}
+              />
+            </>
+          )}
         </div>
       </div>
     );

@@ -1,4 +1,4 @@
-# Frontend Portability Report
+    # Frontend Portability Report
 
 Date: 2026-03-16
 Scope: frontend auth/usermanagement module portability for host apps with custom UI.
@@ -35,12 +35,17 @@ Required runtime package (ship these):
 - frontend/src/auth_usermanagement/hooks/*
 - frontend/src/auth_usermanagement/services/authApi.js
 - frontend/src/auth_usermanagement/services/cognitoClient.js
+- frontend/src/auth_usermanagement/services/customAuthApi.js
 - frontend/src/auth_usermanagement/constants/*
 - frontend/src/auth_usermanagement/utils/*
 - frontend/src/auth_usermanagement/index.js
 
 Optional UI starter package (ship if useful as scaffolding):
-- frontend/src/auth_usermanagement/components/*
+- frontend/src/auth_usermanagement/components/* (includes LoginForm, ProtectedRoute, TenantSwitcher, etc.)
+- frontend/src/auth_usermanagement/components/CustomLoginForm.jsx (custom_ui mode only)
+- frontend/src/auth_usermanagement/components/CustomSignupForm.jsx (custom_ui mode only)
+- frontend/src/auth_usermanagement/components/InviteSetPassword.jsx (custom_ui mode only)
+- frontend/src/auth_usermanagement/components/ForgotPasswordForm.jsx (custom_ui mode only)
 - frontend/src/auth_usermanagement/pages/AdminDashboard.jsx
 - frontend/src/auth_usermanagement/pages/index.js
 
@@ -70,7 +75,7 @@ Module owns:
 - Auth state machine and token lifecycle.
 - Cognito callback/token exchange glue.
 - Tenant-aware API client behavior.
-- Permission and role checks.
+- Permission and role checks (recognises both legacy role names and v3.0 names: account_owner, account_admin, account_member).
 - Invite accept and user-management request flows.
 
 ## Required Environment Configuration
@@ -80,6 +85,7 @@ Set these per host app:
 - VITE_AUTH_API_BASE_PATH
 - VITE_AUTH_CALLBACK_PATH
 - VITE_AUTH_INVITE_PATH_PREFIX
+- VITE_AUTH_MODE ("hosted_ui" default or "custom_ui" for app-owned login/signup forms)
 
 Acceptance checks:
 - Callback route resolves correctly.

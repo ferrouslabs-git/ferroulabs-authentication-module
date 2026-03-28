@@ -280,6 +280,35 @@ export function AuthProvider({ children }) {
     setAuthError("");
   };
 
+  /**
+   * Login with a full token set from custom_ui auth endpoints.
+   * Stores access token in state, refresh token in HttpOnly cookie,
+   * and registers a backend session — same as the Hosted UI callback flow.
+   */
+  const loginWithTokens = async ({ accessToken, idToken: newIdToken, refreshToken }) => {
+    setToken(accessToken);
+    if (newIdToken) setIdToken(newIdToken);
+    setAuthError("");
+
+    if (refreshToken) {
+      try {
+        await storeRefreshCookie(accessToken, refreshToken);
+      } catch (_cookieError) {
+        // Best-effort.
+      }
+    }
+    try {
+      const sessionData = await registerSession(
+        accessToken,
+        refreshToken,
+        { user_agent: isBrowser ? navigator.userAgent : "" },
+      );
+      setSessionId(sessionData.session_id);
+    } catch (_sessionError) {
+      // Best-effort.
+    }
+  };
+
   const logout = async () => {
     // Clear refresh timer
     if (refreshTimerRef.current) {
@@ -317,8 +346,12 @@ export function AuthProvider({ children }) {
     setRoleDefinitions(null);
     setScopeContext(null);
     setAuthError("");
-    // Redirect to Cognito logout after React finishes current render
-    setTimeout(() => logoutFromCognito(), 0);
+    // In custom_ui mode there is no Cognito Hosted UI session to clear.
+    // Only redirect to Cognito logout when using hosted_ui mode.
+    const { AUTH_CONFIG: _cfg } = await import("../config.js");
+    if (_cfg.authMode !== "custom_ui") {
+      setTimeout(() => logoutFromCognito(), 0);
+    }
   };
 
   const changeTenant = (nextTenantId) => {
@@ -404,6 +437,7 @@ export function AuthProvider({ children }) {
       scopeContext,
       isAuthenticated: Boolean(token && user),
       loginWithToken,
+      loginWithTokens,
       logout,
       changeTenant,
       changeSpace,

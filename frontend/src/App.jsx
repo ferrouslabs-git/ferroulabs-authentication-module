@@ -1,20 +1,26 @@
 import { useEffect, useState } from 'react'
 import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
-import { AcceptInvitation, AdminDashboard, AUTH_CONFIG, ProtectedRoute, TenantSwitcher, ToastProvider, useAuth } from './auth_usermanagement'
+import { AcceptInvitation, AdminDashboard, AUTH_CONFIG, CustomLoginForm, CustomSignupForm, ForgotPasswordForm, ProtectedRoute, TenantSwitcher, ToastProvider, useAuth } from './auth_usermanagement'
 import { openHostedLogin, openHostedSignup } from './auth_usermanagement/services/cognitoClient'
 import { createTenant } from './auth_usermanagement/services/authApi'
 
 const ADMIN_ROUTE = '/admin'
+const isCustomUI = AUTH_CONFIG.authMode === 'custom_ui'
 
 function Shell({ children }) {
-  const { isAuthenticated, isLoading, logout, user, tenantId, tenants } = useAuth()
+  const { isAuthenticated, isLoading, logout, loginWithTokens, user, tenantId, tenants } = useAuth()
   const navigate = useNavigate()
   const [isSignInRedirecting, setIsSignInRedirecting] = useState(false)
   const [isSignUpRedirecting, setIsSignUpRedirecting] = useState(false)
+  const [authView, setAuthView] = useState('none') // "none" | "login" | "signup" | "forgot"
   const currentTenant = tenants.find((tenant) => tenant.id === tenantId) || null
-  const canAccessAdmin = Boolean(user?.is_platform_admin || ['owner', 'admin'].includes(currentTenant?.role))
+  const canAccessAdmin = Boolean(user?.is_platform_admin || ['owner', 'admin', 'account_owner', 'account_admin'].includes(currentTenant?.role))
 
   const handleSignIn = async () => {
+    if (isCustomUI) {
+      setAuthView('login')
+      return
+    }
     setIsSignInRedirecting(true)
     try {
       await openHostedLogin()
@@ -24,6 +30,10 @@ function Shell({ children }) {
   }
 
   const handleSignUp = async () => {
+    if (isCustomUI) {
+      setAuthView('signup')
+      return
+    }
     setIsSignUpRedirecting(true)
     try {
       await openHostedSignup()
@@ -33,16 +43,23 @@ function Shell({ children }) {
   }
 
   const handleSignOut = async () => {
+    setAuthView('none')
     await logout()
   }
 
   const handleHome = () => {
+    setAuthView('none')
     navigate(isAuthenticated ? '/dashboard' : '/')
   }
 
   const handleAdmin = () => {
     navigate(ADMIN_ROUTE)
   }
+
+  // Reset auth view when user becomes authenticated
+  useEffect(() => {
+    if (isAuthenticated) setAuthView('none')
+  }, [isAuthenticated])
 
   return (
     <div style={styles.appFrame}>
@@ -105,7 +122,37 @@ function Shell({ children }) {
         </div>
       </aside>
 
-      <main style={styles.mainContent}>{children}</main>
+      <main style={styles.mainContent}>
+        {isCustomUI && authView === 'login' && !isAuthenticated ? (
+          <div style={{ padding: 40, display: 'flex', justifyContent: 'center' }}>
+            <CustomLoginForm
+              onSuccess={async (tokens) => {
+                await loginWithTokens(tokens)
+              }}
+              onNewPasswordRequired={() => {
+                navigate('/')
+              }}
+              onSwitchToSignup={() => setAuthView('signup')}
+              onForgotPassword={() => setAuthView('forgot')}
+            />
+          </div>
+        ) : isCustomUI && authView === 'signup' && !isAuthenticated ? (
+          <div style={{ padding: 40, display: 'flex', justifyContent: 'center' }}>
+            <CustomSignupForm
+              onConfirmed={() => setAuthView('login')}
+              onSwitchToLogin={() => setAuthView('login')}
+            />
+          </div>
+        ) : isCustomUI && authView === 'forgot' && !isAuthenticated ? (
+          <div style={{ padding: 40, display: 'flex', justifyContent: 'center' }}>
+            <ForgotPasswordForm
+              onBackToLogin={() => setAuthView('login')}
+            />
+          </div>
+        ) : (
+          children
+        )}
+      </main>
     </div>
   )
 }

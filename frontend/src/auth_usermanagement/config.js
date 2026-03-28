@@ -22,6 +22,10 @@ export function buildAuthConfig(env = import.meta.env) {
     callbackPath: normalizePathPrefix(env.VITE_AUTH_CALLBACK_PATH, "/callback"),
     invitePathPrefix: normalizeInvitePrefix(env.VITE_AUTH_INVITE_PATH_PREFIX, "/invite/"),
     csrfCookieName: (env.VITE_AUTH_CSRF_COOKIE_NAME || "").trim() || `${namespace}_csrf_token`,
+    // Auth mode: "hosted_ui" (default) or "custom_ui"
+    // hosted_ui = Cognito Hosted UI redirects (existing behaviour)
+    // custom_ui = App-owned login/signup forms calling backend /auth/custom/* endpoints
+    authMode: (env.VITE_AUTH_MODE || "hosted_ui").trim(),
   };
 }
 

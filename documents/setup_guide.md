@@ -214,7 +214,12 @@ COOKIE_SECURE=false
 # Module prefix (default: /auth)
 AUTH_API_PREFIX=/auth
 AUTH_NAMESPACE=authum
+
+# Auth mode: hosted_ui (default) or custom_ui (app-owned login/signup forms)
+# AUTH_MODE=custom_ui
 ```
+
+> **Custom UI mode:** Set `AUTH_MODE=custom_ui` to enable app-owned login/signup forms instead of Cognito Hosted UI redirects. Also enable `ALLOW_USER_PASSWORD_AUTH` on your Cognito app client. See the [Custom UI Integration Guide](../docs/custom_ui_integration_guide.md) for full details.
 
 ---
 
@@ -401,9 +406,14 @@ LoginForm, ProtectedRoute, TenantSwitcher, RoleSelector,
 InviteUserModal, UserList, SessionPanel, AcceptInvitation,
 ToastProvider, AdminDashboard
 
+// Custom UI components (optional — for AUTH_MODE=custom_ui)
+CustomLoginForm, CustomSignupForm, InviteSetPassword, ForgotPasswordForm
+
 // Services
-authApi, cognitoClient
+authApi, cognitoClient, customAuthApi
 ```
+
+> **Frontend auth mode:** Set `VITE_AUTH_MODE=custom_ui` in your frontend `.env` to match the backend. The `useRole()` hook and `ROLE_PERMISSIONS` map recognise both legacy role names (`owner`, `admin`, `member`) and v3.0 names (`account_owner`, `account_admin`, `account_member`) for backward compatibility.
 
 ---
 
@@ -411,7 +421,7 @@ authApi, cognitoClient
 
 1. Create a Cognito User Pool in AWS Console
 2. Add an App Client with:
-   - Auth flow: `ALLOW_USER_SRP_AUTH`, `ALLOW_REFRESH_TOKEN_AUTH`
+   - Auth flow: `ALLOW_USER_SRP_AUTH`, `ALLOW_REFRESH_TOKEN_AUTH` (add `ALLOW_USER_PASSWORD_AUTH` if using `AUTH_MODE=custom_ui`)
    - OAuth: Authorization code grant with PKCE
    - Callback URL: `http://localhost:5173/callback`
    - Sign-out URL: `http://localhost:5173`

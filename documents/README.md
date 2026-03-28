@@ -11,6 +11,7 @@ Last updated: 2026-03-23
 | [setup_guide.md](setup_guide.md) | Step-by-step integration into a new host project (DB wiring, middleware, env vars, migrations, frontend, Docker, cleanup) | Developers |
 | [agent_reference.md](agent_reference.md) | AI agent / developer technical reference — file tree, data model, permission system, API endpoints, service signatures, invariants | AI agents, developers |
 | [cognito_and_sso_guide.md](cognito_and_sso_guide.md) | AWS Cognito base setup, SSO provider configuration (Google / Azure), federation wiring, multi-tenant SSO planning | Developers, ops |
+| [Custom UI Integration Guide](../docs/custom_ui_integration_guide.md) | Building custom login/signup UI instead of Cognito Hosted UI (`AUTH_MODE=custom_ui`) | Developers |
 | [version_1_fullreport.md](version_1_fullreport.md) | Complete system report — architecture, security model, data model, test coverage, change history | All |
 
 ## Archived

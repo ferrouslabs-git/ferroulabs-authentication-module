@@ -12,8 +12,11 @@ import { useTenant } from "./useTenant";
 
 const ROLE_LEVELS = {
   owner: 4,
+  account_owner: 4,
   admin: 3,
+  account_admin: 3,
   member: 2,
+  account_member: 2,
   viewer: 1,
 };
 
@@ -44,7 +47,7 @@ export function useRole() {
     can,
     isOwner: hasV3Context
       ? permissions.includes("account:delete")
-      : role === "owner",
+      : ["owner", "account_owner"].includes(role),
     isAdminOrOwner: hasV3Context
       ? permissions.includes("members:manage")
       : level >= ROLE_LEVELS.admin,

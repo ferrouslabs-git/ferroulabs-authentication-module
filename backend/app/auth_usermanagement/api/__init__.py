@@ -17,6 +17,7 @@ from ..services.cookie_token_service import (
 )
 from .auth_routes import router as auth_router
 from .config_routes import router as config_router
+from .custom_ui_routes import router as custom_ui_router
 from .invitation_routes import router as invitation_router
 from .permission_demo_routes import router as permission_demo_router
 from .platform_user_routes import router as platform_user_router
@@ -31,6 +32,7 @@ router = APIRouter()
 
 router.include_router(auth_router)
 router.include_router(config_router)
+router.include_router(custom_ui_router)
 router.include_router(tenant_router)
 router.include_router(permission_demo_router)
 router.include_router(invitation_router)

@@ -14,7 +14,7 @@
 - **ORM**: SQLAlchemy 2.0
 - **Permission Model**: YAML-driven roles → resolved permission strings
 - **Frontend**: React (hooks + context), Vite bundler
-- **Tests**: 266 backend (SQLite) + 56 frontend
+- **Tests**: 294 backend (SQLite) + 56 frontend
 
 ---
 
@@ -35,6 +35,7 @@ backend/
 │       │   ├── __init__.py              # Router composition (includes all sub-routers)
 │       │   ├── auth_routes.py           # /sync, /debug-token, /me
 │       │   ├── config_routes.py         # /config/roles, /config/permissions
+│       │   ├── custom_ui_routes.py      # /custom/login, /signup, /confirm, /set-password, /forgot-password (AUTH_MODE=custom_ui only)
 │       │   ├── invitation_routes.py     # /invite, /invites/accept, /invites/{token}
 │       │   ├── permission_demo_routes.py
 │       │   ├── platform_tenant_routes.py # /accounts, /accounts/{id}/suspend
@@ -81,6 +82,7 @@ backend/
 │           ├── audit_service.py
 │           ├── auth_config_loader.py    # YAML parser, AuthConfig class
 │           ├── cleanup_service.py       # Purge expired tokens, invitations, rate-limit hits, audit events
+│           ├── cognito_admin_service.py # Cognito Admin API (custom_ui): create invited users, initiate auth, forgot password
 │           ├── cookie_token_service.py
 │           ├── email_service.py         # SES invitation emails
 │           ├── invitation_service.py
@@ -101,6 +103,7 @@ backend/
 │   ├── test_context_models.py
 │   ├── test_cookie_token_endpoints.py
 │   ├── test_cookie_token_service.py
+│   ├── test_custom_ui_auth.py           # Custom UI auth endpoints + Cognito admin service tests
 │   ├── test_db_ownership_boundary.py
 │   ├── test_db_runtime_guardrails.py
 │   ├── test_guards.py
@@ -133,11 +136,11 @@ frontend/
 │   └── auth_usermanagement/
 │       ├── index.js                     # Public exports
 │       ├── config.js
-│       ├── components/                  # LoginForm, ProtectedRoute, TenantSwitcher, etc.
+│       ├── components/                  # LoginForm, ProtectedRoute, TenantSwitcher, CustomLoginForm, CustomSignupForm, InviteSetPassword, ForgotPasswordForm, etc.
 │       ├── context/                     # AuthProvider
 │       ├── hooks/                       # useAuth, useCurrentUser, useTenant, useRole, useSpace
 │       ├── pages/                       # AdminDashboard
-│       ├── services/                    # authApi, cognitoClient
+│       ├── services/                    # authApi, cognitoClient, customAuthApi
 │       └── utils/
 ```
 
@@ -372,7 +375,8 @@ Set `space.enabled: false`. All roles live at the account layer. The space table
 
 4. TenantContextMiddleware — validates headers (no DB access)
    - Stores request.state.requested_scope_type, requested_scope_id, requested_tenant_id
-   - Skips: /health, /sync, /debug-token, /me, /tenants, /tenants/my, /config/*
+   - Skips: /health, /sync, /debug-token, /me, /tenants, /tenants/my, /config/*, /custom/*
+     (Custom UI endpoints are pre-authentication and skip tenant context)
 
 5. Route handler invoked with dependency injection:
    a. get_current_user() → verify JWT → load User from DB → check is_active
@@ -604,6 +608,7 @@ async def remove_user(
 | `AUTH_API_PREFIX` | `/auth` | Route mount point |
 | `AUTH_NAMESPACE` | `authum` | Cookie name prefix |
 | `AUTH_CONFIG_PATH` | `<module>/auth_config.yaml` | YAML config location |
+| `AUTH_MODE` | `hosted_ui` | Auth mode: `hosted_ui` (Cognito redirect) or `custom_ui` (app-owned forms) |
 
 ### Frontend (Vite)
 
@@ -613,6 +618,7 @@ async def remove_user(
 | `VITE_COGNITO_DOMAIN` | Cognito hosted UI |
 | `VITE_COGNITO_CLIENT_ID` | App client ID |
 | `VITE_COGNITO_REDIRECT_URI` | OAuth callback URL |
+| `VITE_AUTH_MODE` | Auth mode: `hosted_ui` (default) or `custom_ui` |
 
 ---
 
@@ -635,6 +641,18 @@ All prefixed with `AUTH_API_PREFIX` (default: `/auth`).
 | `POST` | `/cookie/store-refresh` | Store refresh token as httpOnly cookie |
 | `GET` | `/config/roles` | List configured roles |
 | `GET` | `/config/permissions` | List configured permissions |
+
+### Custom UI (AUTH_MODE=custom_ui only — returns 404 otherwise)
+
+| Method | Path | Purpose |
+|---|---|---|
+| `POST` | `/custom/login` | Email + password login via Cognito |
+| `POST` | `/custom/signup` | Self-service user registration |
+| `POST` | `/custom/confirm` | Confirm email with verification code |
+| `POST` | `/custom/set-password` | Complete NEW_PASSWORD_REQUIRED challenge (invited users) |
+| `POST` | `/custom/resend-code` | Resend email verification code |
+| `POST` | `/custom/forgot-password` | Request password reset code |
+| `POST` | `/custom/confirm-forgot-password` | Reset password with code + new password |
 
 ### Account-Scoped (X-Tenant-ID or X-Scope-Type=account)
 

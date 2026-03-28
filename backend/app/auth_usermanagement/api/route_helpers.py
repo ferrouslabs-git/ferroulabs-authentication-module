@@ -12,6 +12,10 @@ from ..services.auth_config_loader import get_auth_config
 from ..services.email_service import send_invitation_email
 from ..services.invitation_service import create_invitation
 
+import logging
+
+_logger = logging.getLogger(__name__)
+
 
 def ensure_scope_access(scope_id: UUID, ctx: ScopeContext) -> None:
     if scope_id != ctx.scope_id and not ctx.is_super_admin:
@@ -92,6 +96,18 @@ async def create_invitation_response(
 
     settings = get_settings()
     invite_url = f"{settings.frontend_url}/invite/{raw_token}"
+
+    # In custom_ui mode, pre-create the user in Cognito so the frontend
+    # can show a "set password" form instead of the Hosted UI signup page.
+    if settings.auth_mode == "custom_ui":
+        from ..services.cognito_admin_service import create_invited_cognito_user
+        cognito_result = create_invited_cognito_user(invitation.email)
+        if "error" in cognito_result:
+            _logger.warning(
+                "Cognito pre-creation failed; invitation still created",
+                extra={"email": invitation.email, "error": cognito_result["error"]},
+            )
+
     email_result = await send_invitation_email(
         to_email=invitation.email,
         invite_url=invite_url,

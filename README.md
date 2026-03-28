@@ -9,6 +9,7 @@ Reusable multi-tenant auth and user management module for FastAPI + React applic
 - Invitation lifecycle with hashed tokens and SES email delivery
 - Cookie-based refresh tokens with CSRF protection
 - Session management with device tracking
+- **Dual-mode authentication**: Cognito Hosted UI (default) or custom login/signup forms (`AUTH_MODE=custom_ui`) with forgot-password support
 - PostgreSQL row-level security for tenant isolation
 - Distributed rate limiting on sensitive endpoints
 - Audit event logging for all security-relevant actions
@@ -42,6 +43,7 @@ All detailed documentation lives in [`documents/`](documents/):
 |----------|---------|
 | [Setup Guide](documents/setup_guide.md) | Step-by-step integration into a new host project |
 | [Agent Reference](documents/agent_reference.md) | AI agent / developer technical reference |
+| [Custom UI Guide](docs/custom_ui_integration_guide.md) | Build custom login/signup forms instead of Cognito Hosted UI |
 | [Cognito & SSO Guide](documents/cognito_and_sso_guide.md) | AWS Cognito setup and SSO federation planning |
 | [Version 1 Report](documents/version_1_fullreport.md) | Full system documentation, security model, and changelog |
 

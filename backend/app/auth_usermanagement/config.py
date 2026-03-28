@@ -33,6 +33,11 @@ class Settings(BaseSettings):
         os.path.join(os.path.dirname(__file__), "auth_config.yaml"),
     )
 
+    # Auth mode: "hosted_ui" (default) or "custom_ui"
+    # hosted_ui = Cognito Hosted UI redirects (existing behaviour)
+    # custom_ui = App-owned login/signup forms calling Cognito API directly
+    auth_mode: str = os.getenv("AUTH_MODE", "hosted_ui")
+
     # Portability
     auth_namespace: str = os.getenv("AUTH_NAMESPACE", "authum")
     # Default is "/auth". Set AUTH_API_PREFIX="/v1/auth" for versioned APIs.
