@@ -56,3 +56,13 @@ class RemoveUserResponse(BaseModel):
     tenant_id: UUID
     status: str
     message: str
+
+
+class MembershipListResponse(BaseModel):
+    scope_type: str
+    scope_id: UUID
+    role: str
+    status: str
+    tenant_id: UUID | None = None
+    tenant_name: str | None = None
+    joined_at: datetime

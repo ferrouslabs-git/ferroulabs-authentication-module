@@ -9,12 +9,24 @@ from ..models.membership import Membership
 from ..models.user import User
 
 
-def list_tenant_users(db: Session, tenant_id: UUID) -> list[dict]:
-    memberships = db.query(Membership).filter(
+def list_tenant_users(
+    db: Session,
+    tenant_id: UUID,
+    *,
+    role: str | None = None,
+    status_filter: str | None = None,
+) -> list[dict]:
+    query = db.query(Membership).filter(
         Membership.scope_type == "account",
         Membership.scope_id == tenant_id,
-        Membership.status == "active",
-    ).all()
+    )
+    if status_filter:
+        query = query.filter(Membership.status == status_filter)
+    else:
+        query = query.filter(Membership.status == "active")
+    if role:
+        query = query.filter(Membership.role_name == role)
+    memberships = query.all()
 
     return [
         {
@@ -30,10 +42,20 @@ def list_tenant_users(db: Session, tenant_id: UUID) -> list[dict]:
     ]
 
 
-def list_platform_users(db: Session) -> list[dict]:
-    users = db.query(User).options(
+def list_platform_users(db: Session, *, role: str | None = None) -> list[dict]:
+    query = db.query(User).options(
         selectinload(User.memberships)
-    ).order_by(User.email.asc()).all()
+    ).order_by(User.email.asc())
+    if role:
+        query = query.filter(
+            User.id.in_(
+                db.query(Membership.user_id).filter(
+                    Membership.role_name == role,
+                    Membership.status == "active",
+                )
+            )
+        )
+    users = query.all()
 
     return [
         {
@@ -141,6 +163,24 @@ def remove_user_from_tenant(db: Session, tenant_id: UUID, user_id: UUID) -> Memb
             raise ValueError("Cannot remove last owner")
 
     membership.status = "removed"
+    db.commit()
+    db.refresh(membership)
+    return membership
+
+
+def reactivate_user_in_tenant(db: Session, tenant_id: UUID, user_id: UUID) -> Membership | None:
+    """Reactivate a previously removed membership (status 'removed' → 'active')."""
+    membership = db.query(Membership).filter(
+        Membership.scope_type == "account",
+        Membership.scope_id == tenant_id,
+        Membership.user_id == user_id,
+        Membership.status == "removed",
+    ).first()
+
+    if not membership:
+        return None
+
+    membership.status = "active"
     db.commit()
     db.refresh(membership)
     return membership

@@ -31,6 +31,52 @@ def _parse_uuid(value: str | UUID | None) -> UUID | None:
         return None
 
 
+def list_audit_events(
+    db: Session,
+    *,
+    action: str | None = None,
+    actor_user_id: str | None = None,
+    tenant_id: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> list[dict]:
+    """Query audit events with optional filters."""
+    query = db.query(AuditEvent)
+
+    if action:
+        query = query.filter(AuditEvent.action == action)
+    if actor_user_id:
+        parsed = _parse_uuid(actor_user_id)
+        if parsed:
+            query = query.filter(AuditEvent.actor_user_id == parsed)
+    if tenant_id:
+        parsed = _parse_uuid(tenant_id)
+        if parsed:
+            query = query.filter(AuditEvent.tenant_id == parsed)
+
+    events = (
+        query.order_by(AuditEvent.timestamp.desc())
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
+
+    return [
+        {
+            "id": str(e.id),
+            "timestamp": e.timestamp.isoformat() if e.timestamp else None,
+            "action": e.action,
+            "actor_user_id": str(e.actor_user_id) if e.actor_user_id else None,
+            "tenant_id": str(e.tenant_id) if e.tenant_id else None,
+            "target_type": e.target_type,
+            "target_id": e.target_id,
+            "ip_address": e.ip_address,
+            "metadata": e.metadata_json or {},
+        }
+        for e in events
+    ]
+
+
 def log_audit_event(
     event: str,
     actor_user_id: str | UUID | None = None,

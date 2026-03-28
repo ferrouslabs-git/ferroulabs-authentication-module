@@ -31,7 +31,7 @@ Source of truth: code only (no assumptions from planning docs)
             session_routes.py           # /sessions
             space_routes.py             # /spaces, /spaces/my
             tenant_routes.py            # /tenants, /tenants/my
-            tenant_user_routes.py       # /tenants/{id}/users, role changes
+            tenant_user_routes.py       # /tenants/{id}/users, role changes, deactivate/reactivate
           models/
             __init__.py
             audit_event.py              # AuditEvent
@@ -217,6 +217,7 @@ From auth_routes.py:
 - GET /auth/debug-token
 - POST /auth/sync
 - GET /auth/me
+- GET /auth/me/memberships
 
 ### 4.2 Tenant endpoints
 
@@ -224,6 +225,10 @@ From tenant_routes.py:
 - POST /auth/tenants
 - GET /auth/tenants/my
 - GET /auth/tenant-context
+- GET /auth/tenants/{tenant_id}
+- PATCH /auth/tenants/{tenant_id}
+- GET /auth/tenants/{tenant_id}/invitations
+- POST /auth/tenants/{tenant_id}/invitations/bulk
 
 ### 4.3 Config endpoints
 
@@ -238,14 +243,18 @@ From invitation_routes.py:
 - POST /auth/tenants/{tenant_id}/invite
 - GET /auth/invites/{token}
 - DELETE /auth/tenants/{tenant_id}/invites/{token}
+- POST /auth/tenants/{tenant_id}/invites/{token}/resend
+- POST /auth/tenants/{tenant_id}/invitations/{invitation_id}/resend
 - POST /auth/invites/accept
 
 ### 4.5 Tenant user management endpoints
 
 From tenant_user_routes.py:
-- GET /auth/tenants/{tenant_id}/users
+- GET /auth/tenants/{tenant_id}/users (supports ?role= and ?status= query params)
 - PATCH /auth/tenants/{tenant_id}/users/{user_id}/role
 - DELETE /auth/tenants/{tenant_id}/users/{user_id}
+- PATCH /auth/tenants/{tenant_id}/users/{user_id}/deactivate
+- PATCH /auth/tenants/{tenant_id}/users/{user_id}/reactivate
 
 ### 4.6 Session endpoints
 
@@ -261,21 +270,32 @@ From session_routes.py:
 From space_routes.py:
 - POST /auth/spaces
 - GET /auth/spaces/my
+- GET /auth/spaces/{space_id}
+- PATCH /auth/spaces/{space_id}
 
 ### 4.8 Platform admin endpoints
 
 From platform_user_routes.py:
-- GET /auth/platform/users
+- GET /auth/platform/users (supports ?role= query param)
 - PATCH /auth/users/{user_id}/suspend
 - PATCH /auth/users/{user_id}/unsuspend
 - PATCH /auth/platform/users/{user_id}/promote
 - PATCH /auth/platform/users/{user_id}/demote
+- DELETE /auth/platform/users/{user_id}
+- POST /auth/platform/users/{user_id}/cognito/disable
+- POST /auth/platform/users/{user_id}/cognito/enable
+- GET /auth/platform/users/{user_id}/cognito
+- GET /auth/platform/users/{user_id}
+- POST /auth/platform/users/{user_id}/cognito/reset-password
 
 From platform_tenant_routes.py:
 - GET /auth/platform/tenants
 - PATCH /auth/platform/tenants/{tenant_id}/suspend
 - PATCH /auth/platform/tenants/{tenant_id}/unsuspend
 - GET /auth/platform/invitations/failed
+- GET /auth/platform/audit-events
+- POST /auth/platform/cleanup
+- DELETE /auth/platform/tenants/{tenant_id}
 
 ### 4.9 Cookie and refresh endpoints
 
@@ -686,7 +706,7 @@ Frontend:
 
 ## 12. Test Coverage
 
-### Backend (300 tests on SQLite, 301 on PostgreSQL)
+### Backend (381 tests on SQLite, 382 on PostgreSQL)
 
 - DB ownership boundary and guardrail tests
 - Scope context and permission guard tests
@@ -706,7 +726,7 @@ Frontend:
 - API prefix versioning test
 - Row-level security tests (PostgreSQL-only, 6 tests)
 
-### Frontend (56 tests across 10 files)
+### Frontend (57 tests across 10 files)
 
 - config.test.js — AUTH_CONFIG defaults and overrides
 - cognitoClient.test.js — PKCE flow, login URL, code exchange
@@ -891,7 +911,7 @@ Verified against PostgreSQL 17.6 on AWS RDS.
 - SES failure visibility: email_send_failed audit event; GET /platform/invitations/failed endpoint.
 - Cognito AdminUserGlobalSignOut on user suspension.
 - Docker support: Dockerfile, docker-compose.yml (PostgreSQL + backend + frontend).
-- Frontend test suite: 56 tests across 10 files.
+- Frontend test suite: 57 tests across 10 files.
 - API versioning: AUTH_API_PREFIX configurable (e.g. /v1/auth).
 - RLS verified on PostgreSQL 17.6 (AWS RDS) with non-superuser role.
 - Cleanup service verified against real PostgreSQL data.
@@ -907,7 +927,7 @@ Verified against PostgreSQL 17.6 on AWS RDS.
 - CSRF cookie path changed from /auth/token to / (JS must read from any page URL).
 - Frontend role recognition updated for v3.0 names (account_owner, account_admin, account_member) alongside legacy names.
 - Cognito requires ALLOW_USER_PASSWORD_AUTH enabled on app client for custom_ui mode.
-- 300 backend tests passing (SQLite), 301 on PostgreSQL.
+- 381 backend tests passing (SQLite), 382 on PostgreSQL.
 
 ---
 

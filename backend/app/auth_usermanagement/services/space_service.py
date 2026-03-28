@@ -94,3 +94,20 @@ def unsuspend_space(db: Session, space_id: UUID) -> Space:
     db.commit()
     db.refresh(space)
     return space
+
+
+def get_space_by_id(db: Session, space_id: UUID) -> Space | None:
+    """Get a space by ID."""
+    return db.query(Space).filter(Space.id == space_id).first()
+
+
+def update_space(db: Session, space_id: UUID, *, name: str | None = None) -> Space:
+    """Update mutable space fields."""
+    space = db.query(Space).filter(Space.id == space_id).first()
+    if space is None:
+        raise ValueError("Space not found")
+    if name is not None:
+        space.name = name
+    db.commit()
+    db.refresh(space)
+    return space

@@ -14,7 +14,7 @@
 - **ORM**: SQLAlchemy 2.0
 - **Permission Model**: YAML-driven roles → resolved permission strings
 - **Frontend**: React (hooks + context), Vite bundler
-- **Tests**: 300 backend (SQLite) + 56 frontend
+- **Tests**: 381 backend (SQLite) + 57 frontend
 
 ---
 
@@ -45,7 +45,7 @@ backend/
 │       │   ├── session_routes.py        # /sessions
 │       │   ├── space_routes.py          # /spaces, /spaces/my
 │       │   ├── tenant_routes.py         # /tenants, /tenants/my
-│       │   └── tenant_user_routes.py    # /tenants/{id}/users, role changes
+│       │   └── tenant_user_routes.py    # /tenants/{id}/users, role changes, deactivate/reactivate
 │       ├── models/
 │       │   ├── __init__.py              # Exports all models
 │       │   ├── audit_event.py           # AuditEvent
@@ -125,10 +125,13 @@ backend/
 │   ├── test_tenant_isolation_api.py
 │   ├── test_tenant_middleware.py
 │   ├── test_tenant_service.py
+│   ├── test_tenant_detail_api.py
 │   ├── test_user_management_service.py
 │   ├── test_user_service.py
 │   ├── test_user_suspension_api.py
-│   └── test_user_suspension.py
+│   ├── test_user_suspension.py
+│   ├── test_platform_user_delete_api.py
+│   └── test_cognito_admin_ops.py
 frontend/
 ├── src/
 │   ├── App.jsx
@@ -403,6 +406,7 @@ suspend_user(user_id: UUID, db: Session) -> User
 unsuspend_user(user_id: UUID, db: Session) -> User
 promote_to_platform_admin(user_id: UUID, db: Session) -> User
 demote_from_platform_admin(user_id: UUID, db: Session) -> User
+delete_user(user_id: UUID, db: Session) -> dict  # Full cleanup: Cognito + sessions + memberships + invitations + user record
 ```
 
 ### tenant_service.py
@@ -416,6 +420,7 @@ list_platform_tenants(db: Session) -> List[dict]
 verify_user_tenant_access(user_id: UUID, tenant_id: UUID, db: Session) -> bool
 suspend_tenant(tenant_id: UUID, db: Session) -> Tenant
 unsuspend_tenant(tenant_id: UUID, db: Session) -> Tenant
+update_tenant(tenant_id: UUID, db: Session, *, name: str | None = None, plan: str | None = None) -> Tenant
 ```
 
 ### invitation_service.py
@@ -425,8 +430,10 @@ create_invitation(db, tenant_id, email, role, created_by, expires_in_days=2, tar
 get_invitation_by_token(db: Session, token: str) -> Invitation | None
 accept_invitation(db: Session, invitation: Invitation, user: User) -> Membership
 get_tenant_invitation_by_token(db: Session, tenant_id: UUID, token: str) -> Invitation | None
+get_invitation_by_id(db: Session, tenant_id: UUID, invitation_id: UUID) -> Invitation | None
 resend_invitation(db: Session, invitation: Invitation, expires_in_days: int = 2) -> tuple[Invitation, str]  # generates fresh token, extends expiry
 revoke_invitation(db: Session, invitation: Invitation) -> Invitation
+list_tenant_invitations(db: Session, tenant_id: UUID, *, status_filter: str | None = None) -> list[dict]
 ```
 
 ### session_service.py
@@ -453,10 +460,11 @@ unsuspend_space(db, space_id) -> Space
 ### user_management_service.py
 
 ```python
-list_tenant_users(db: Session, tenant_id: UUID) -> list[dict]
-list_platform_users(db: Session) -> list[dict]
+list_tenant_users(db: Session, tenant_id: UUID, *, role: str | None = None, status_filter: str | None = None) -> list[dict]
+list_platform_users(db: Session, *, role: str | None = None) -> list[dict]
 update_user_role(db, tenant_id, user_id, new_role, actor_role, actor_is_platform_admin=False) -> Membership | None
 remove_user_from_tenant(db, tenant_id, user_id) -> Membership | None
+reactivate_user_in_tenant(db: Session, tenant_id: UUID, user_id: UUID) -> Membership | None
 ```
 
 ### cookie_token_service.py
@@ -469,6 +477,26 @@ revoke_refresh_token(db, cookie_key) -> None
 set_refresh_cookie(response, cookie_key, *, secure=True, cookie_name=..., cookie_path=...) -> None
 clear_refresh_cookie(response, *, secure=True, ...) -> None
 call_cognito_refresh(refresh_token, cognito_domain, client_id) -> dict
+```
+
+### cognito_admin_service.py
+
+```python
+# Custom UI auth flows (AUTH_MODE=custom_ui)
+initiate_auth(email: str, password: str) -> dict
+sign_up(email: str, password: str) -> dict
+confirm_sign_up(email: str, code: str) -> dict
+set_user_password(email: str, password: str) -> dict
+resend_confirmation_code(email: str) -> dict
+initiate_forgot_password(email: str) -> dict
+confirm_forgot_password(email: str, code: str, new_password: str) -> dict
+
+# Admin operations (platform admin only)
+admin_delete_user(email: str) -> dict     # Permanent Cognito deletion
+admin_disable_user(email: str) -> dict    # Block sign-in
+admin_enable_user(email: str) -> dict     # Re-enable sign-in
+admin_get_user(email: str) -> dict        # Returns status, enabled, create_date, attributes
+admin_reset_user_password(email: str) -> dict  # Force password reset via email
 ```
 
 ### audit_service.py
@@ -635,6 +663,11 @@ All prefixed with `AUTH_API_PREFIX` (default: `/auth`).
 | `GET` | `/debug-token` | JWT payload inspection |
 | `POST` | `/tenants` | Create tenant (auto-owner) |
 | `GET` | `/tenants/my` | List user's tenants |
+| `GET` | `/tenants/{id}` | Get tenant detail (member+ or platform admin) |
+| `PATCH` | `/tenants/{id}` | Update tenant name/plan (owner+ or platform admin) |
+| `GET` | `/tenants/{id}/invitations` | List tenant invitations (member+ or platform admin) |
+| `POST` | `/tenants/{id}/invitations/bulk` | Bulk create up to 50 invitations (member+ or platform admin) |
+| `GET` | `/me/memberships` | List all memberships for authenticated user |
 | `POST` | `/invites/accept` | Accept invitation by token |
 | `GET` | `/invites/{token}/preview` | Preview invitation (no auth) |
 | `POST` | `/token/refresh` | Refresh access token via cookie |
@@ -658,16 +691,21 @@ All prefixed with `AUTH_API_PREFIX` (default: `/auth`).
 
 | Method | Path | Guard | Purpose |
 |---|---|---|---|
-| `GET` | `/tenants/{id}/users` | `account:read` | List tenant members |
+| `GET` | `/tenants/{id}/users` | `account:read` | List tenant members (supports `?role=` and `?status=` filters) |
 | `PATCH` | `/tenants/{id}/users/{uid}/role` | `members:manage` | Change member role |
 | `DELETE` | `/tenants/{id}/users/{uid}` | `members:manage` | Remove member |
+| `PATCH` | `/tenants/{id}/users/{uid}/deactivate` | `members:manage` | Deactivate member (soft-remove) |
+| `PATCH` | `/tenants/{id}/users/{uid}/reactivate` | `members:manage` | Reactivate deactivated member |
 | `POST` | `/invite` | `members:invite` | Send invitation |
-| `POST` | `/tenants/{id}/invites/{token}/resend` | `members:invite` | Resend invitation (fresh token + email) |
+| `POST` | `/tenants/{id}/invites/{token}/resend` | `members:invite` | Resend invitation by token (fresh token + email) |
+| `POST` | `/tenants/{id}/invitations/{invitation_id}/resend` | `members:invite` | Resend invitation by ID (fresh token + email) |
 | `DELETE` | `/invites/{token}` | `members:invite` | Revoke invitation |
 | `GET` | `/sessions` | — | List user sessions |
 | `DELETE` | `/sessions/{id}` | — | Revoke session |
 | `POST` | `/spaces` | `spaces:create` | Create space |
 | `GET` | `/spaces/my` | `account:read` | List user's spaces |
+| `GET` | `/spaces/{id}` | `account:read` | Get space detail |
+| `PATCH` | `/spaces/{id}` | `spaces:create` | Update space name |
 
 ### Platform-Scoped (platform admin only)
 
@@ -677,11 +715,20 @@ All prefixed with `AUTH_API_PREFIX` (default: `/auth`).
 | `PATCH` | `/platform/tenants/{id}/suspend` | Suspend tenant |
 | `PATCH` | `/platform/tenants/{id}/unsuspend` | Unsuspend tenant |
 | `GET` | `/platform/invitations/failed` | List failed invitation emails |
-| `GET` | `/platform/users` | List all users |
+| `GET` | `/platform/users` | List all users (supports `?role=` filter) |
+| `GET` | `/platform/users/{id}` | Get user detail with memberships |
 | `PATCH` | `/users/{id}/suspend` | Suspend user |
 | `PATCH` | `/users/{id}/unsuspend` | Unsuspend user |
 | `PATCH` | `/platform/users/{id}/promote` | Promote to platform admin |
 | `PATCH` | `/platform/users/{id}/demote` | Demote from platform admin |
+| `DELETE` | `/platform/users/{id}` | Permanently delete user (Cognito + DB) |
+| `POST` | `/platform/users/{id}/cognito/disable` | Disable Cognito sign-in |
+| `POST` | `/platform/users/{id}/cognito/enable` | Re-enable Cognito sign-in |
+| `GET` | `/platform/users/{id}/cognito` | Get Cognito user status |
+| `POST` | `/platform/users/{id}/cognito/reset-password` | Force password reset |
+| `GET` | `/platform/audit-events` | Query audit events with filters |
+| `POST` | `/platform/cleanup` | Trigger cleanup of expired tokens/invitations |
+| `DELETE` | `/platform/tenants/{id}` | Permanently delete tenant (cascade) |
 
 ---
 

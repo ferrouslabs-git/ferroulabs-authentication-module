@@ -193,3 +193,58 @@ def unsuspend_tenant(tenant_id: UUID, db: Session) -> Tenant:
     db.commit()
     db.refresh(tenant)
     return tenant
+
+
+def update_tenant(tenant_id: UUID, db: Session, *, name: str | None = None, plan: str | None = None) -> Tenant:
+    """Update mutable tenant fields (name, plan)."""
+    tenant = get_tenant_by_id(tenant_id, db)
+    if not tenant:
+        raise ValueError(f"Tenant not found: {tenant_id}")
+
+    if name is not None:
+        tenant.name = name
+    if plan is not None:
+        tenant.plan = plan
+
+    db.commit()
+    db.refresh(tenant)
+    return tenant
+
+
+def delete_tenant(tenant_id: UUID, db: Session) -> dict:
+    """Permanently delete a tenant and all associated data.
+
+    Cascades: invitations (via FK CASCADE), memberships removed manually,
+    spaces deleted manually. Irreversible.
+    """
+    from ..models.invitation import Invitation
+    from ..models.space import Space
+
+    tenant = get_tenant_by_id(tenant_id, db)
+    if not tenant:
+        raise ValueError(f"Tenant not found: {tenant_id}")
+
+    name = tenant.name
+
+    # Delete account-scoped memberships
+    db.query(Membership).filter(
+        Membership.scope_type == "account",
+        Membership.scope_id == tenant_id,
+    ).delete(synchronize_session=False)
+
+    # Delete spaces belonging to this tenant and their space-scoped memberships
+    space_ids = [s.id for s in db.query(Space).filter(Space.account_id == tenant_id).all()]
+    if space_ids:
+        db.query(Membership).filter(
+            Membership.scope_type == "space",
+            Membership.scope_id.in_(space_ids),
+        ).delete(synchronize_session=False)
+        db.query(Space).filter(Space.account_id == tenant_id).delete(synchronize_session=False)
+
+    # Invitations cascade via FK, but be explicit
+    db.query(Invitation).filter(Invitation.tenant_id == tenant_id).delete(synchronize_session=False)
+
+    db.delete(tenant)
+    db.commit()
+
+    return {"tenant_id": str(tenant_id), "name": name}

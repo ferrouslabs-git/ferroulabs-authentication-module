@@ -629,6 +629,9 @@ All endpoints are mounted under the configured prefix (default: `/auth`).
 | GET | /debug-token | Bearer | — | Debug JWT claims |
 | POST | /tenants | Bearer | — | Create tenant |
 | GET | /tenants/my | Bearer | — | List user's tenants |
+| GET | /tenants/{id} | Bearer | — | Get tenant detail |
+| PATCH | /tenants/{id} | Bearer | — | Update tenant name/plan |
+| GET | /tenants/{id}/invitations | Bearer | — | List tenant invitations |
 | GET | /tenants/{id}/users | Bearer | account | List tenant members |
 | PATCH | /tenants/{id}/users/{uid}/role | Bearer | account | Change member role |
 | DELETE | /tenants/{id}/users/{uid} | Bearer | account | Remove member |
@@ -648,8 +651,16 @@ All endpoints are mounted under the configured prefix (default: `/auth`).
 | POST | /accounts/{id}/suspend | Bearer | platform | Suspend tenant |
 | POST | /accounts/{id}/unsuspend | Bearer | platform | Unsuspend tenant |
 | GET | /platform/users | Bearer | platform | List all users |
-| POST | /platform/users/{id}/suspend | Bearer | platform | Suspend user |
-| POST | /platform/users/{id}/unsuspend | Bearer | platform | Unsuspend user |
+| GET | /platform/users/{id} | Bearer | platform | Get user detail |
+| PATCH | /users/{id}/suspend | Bearer | platform | Suspend user |
+| PATCH | /users/{id}/unsuspend | Bearer | platform | Unsuspend user |
+| PATCH | /platform/users/{id}/promote | Bearer | platform | Promote to platform admin |
+| PATCH | /platform/users/{id}/demote | Bearer | platform | Demote from platform admin |
+| DELETE | /platform/users/{id} | Bearer | platform | Delete user (Cognito + DB) |
+| POST | /platform/users/{id}/cognito/disable | Bearer | platform | Disable Cognito sign-in |
+| POST | /platform/users/{id}/cognito/enable | Bearer | platform | Re-enable Cognito sign-in |
+| GET | /platform/users/{id}/cognito | Bearer | platform | Get Cognito user status |
+| POST | /platform/users/{id}/cognito/reset-password | Bearer | platform | Force password reset |
 
 ### Required Headers for Scoped Routes
 

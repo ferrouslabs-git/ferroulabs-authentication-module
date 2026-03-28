@@ -153,12 +153,31 @@ class TenantContextMiddleware(BaseHTTPMiddleware):
         if path == f"{self.auth_prefix}/tenants/my" and request.method == "GET":
             return True
 
+        # Allow direct tenant detail, update, and invitation listing routes.
+        # These authenticate via get_current_user and check membership in the endpoint.
+        # But NOT /tenants/{id}/users/* which uses scope-context middleware.
+        tenants_prefix = f"{self.auth_prefix}/tenants/"
+        if path.startswith(tenants_prefix):
+            remainder = path[len(tenants_prefix):]
+            # e.g. "{uuid}" or "{uuid}/invitations" — skip middleware
+            # but NOT "{uuid}/users" or "{uuid}/users/{uid}/role" etc.
+            parts = remainder.split("/", 1)
+            if len(parts) == 1:
+                # /tenants/{uuid} — detail/update
+                return True
+            if len(parts) == 2 and parts[1] in ("invitations", "invitations/bulk"):
+                return True
+
         # Allow invitation token routes (do not require tenant header)
         if path.startswith(f"{self.auth_prefix}/invites/"):
             return True
 
         # Session revocation routes are user-scoped, not tenant-scoped.
         if path.startswith(f"{self.auth_prefix}/sessions"):
+            return True
+
+        # /me routes are user-scoped.
+        if path.startswith(f"{self.auth_prefix}/me"):
             return True
 
         # Cookie management and token refresh are user-scoped, not tenant-scoped.

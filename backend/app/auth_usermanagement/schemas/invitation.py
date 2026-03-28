@@ -92,3 +92,30 @@ class InvitationAcceptResponse(BaseModel):
     scope_type: str | None = None
     scope_id: UUID | None = None
     role_name: str | None = None
+
+
+class BulkInvitationItem(BaseModel):
+    """A single entry in a bulk invite request."""
+    email: EmailStr
+    role: str = Field(default="member", description="Legacy role name")
+    target_role_name: str | None = Field(default=None, description="v3 role name")
+
+
+class BulkInvitationCreateRequest(BaseModel):
+    """Request schema for bulk invitations."""
+    invitations: list[BulkInvitationItem] = Field(..., min_length=1, max_length=50)
+
+
+class BulkInvitationResultItem(BaseModel):
+    email: str
+    success: bool
+    invitation_id: UUID | None = None
+    error: str | None = None
+
+
+class BulkInvitationCreateResponse(BaseModel):
+    tenant_id: UUID
+    total: int
+    succeeded: int
+    failed: int
+    results: list[BulkInvitationResultItem]

@@ -8,14 +8,16 @@ from ..database import get_db
 
 from ..models.user import User
 from ..schemas.invitation import InvitationCreateRequest, InvitationCreateResponse
-from ..schemas.space import SpaceCreateRequest, SpaceResponse, SpaceSuspendResponse
+from ..schemas.space import SpaceCreateRequest, SpaceResponse, SpaceSuspendResponse, SpaceUpdateRequest
 from ..security import ScopeContext, get_current_user, require_permission
 from ..services.space_service import (
     create_space,
+    get_space_by_id,
     list_account_spaces,
     list_user_spaces,
     suspend_space,
     unsuspend_space,
+    update_space,
 )
 from .route_helpers import create_invitation_response
 
@@ -75,6 +77,36 @@ async def invite_to_space(
     # tenant_id comes from context (the parent account)
     tenant_id = ctx.scope_id
     return await create_invitation_response(db, tenant_id, invite_data, current_user, ctx)
+
+
+@router.get("/spaces/{space_id}", response_model=SpaceResponse)
+async def get_space_detail(
+    space_id: UUID,
+    ctx: ScopeContext = Depends(require_permission("account:read")),
+    db: Session = Depends(get_db),
+):
+    """Get details for a single space."""
+    space = get_space_by_id(db, space_id)
+    if not space:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Space not found")
+    return space
+
+
+@router.patch("/spaces/{space_id}", response_model=SpaceResponse)
+async def update_space_detail(
+    space_id: UUID,
+    payload: SpaceUpdateRequest,
+    ctx: ScopeContext = Depends(require_permission("spaces:create")),
+    db: Session = Depends(get_db),
+):
+    """Update space name. Requires spaces:create permission."""
+    if payload.name is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="At least one field (name) must be provided")
+    try:
+        space = update_space(db, space_id, name=payload.name)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    return space
 
 
 @router.post("/spaces/{space_id}/suspend", response_model=SpaceSuspendResponse)

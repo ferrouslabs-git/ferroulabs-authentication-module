@@ -5,7 +5,10 @@ from sqlalchemy.orm import Session
 
 from ..database import get_db
 
+from ..models.membership import Membership
+from ..models.tenant import Tenant
 from ..models.user import User
+from ..schemas.user_management import MembershipListResponse
 from ..security import InvalidTokenError, get_current_user, verify_token
 from ..services.user_service import sync_user_from_cognito
 
@@ -140,3 +143,35 @@ async def get_current_user_profile(current_user: User = Depends(get_current_user
         "created_at": current_user.created_at.isoformat(),
         "updated_at": current_user.updated_at.isoformat(),
     }
+
+
+@router.get("/me/memberships", response_model=list[MembershipListResponse])
+async def get_my_memberships(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """List all memberships for the authenticated user."""
+    memberships = (
+        db.query(Membership)
+        .filter(Membership.user_id == current_user.id, Membership.status == "active")
+        .all()
+    )
+    results = []
+    for m in memberships:
+        tenant_name = None
+        if m.scope_type == "account":
+            tenant = db.query(Tenant).filter(Tenant.id == m.scope_id).first()
+            if tenant:
+                tenant_name = tenant.name
+        results.append(
+            MembershipListResponse(
+                scope_type=m.scope_type,
+                scope_id=m.scope_id,
+                role=m.role_name,
+                status=m.status,
+                tenant_id=m.scope_id if m.scope_type == "account" else None,
+                tenant_name=tenant_name,
+                joined_at=m.created_at,
+            )
+        )
+    return results

@@ -12,6 +12,9 @@ from datetime import datetime, UTC
 
 from ..config import get_settings
 from ..models.user import User
+from ..models.membership import Membership
+from ..models.session import Session as AuthSession
+from ..models.invitation import Invitation
 from ..schemas.token import TokenPayload
 
 logger = logging.getLogger(__name__)
@@ -227,3 +230,82 @@ def demote_from_platform_admin(user_id: UUID, db: Session) -> User:
     db.commit()
     db.refresh(user)
     return user
+
+
+def delete_user(user_id: UUID, db: Session) -> dict:
+    """Permanently delete a user from Cognito and the local database.
+
+    Performs full cleanup in order:
+    1. Delete user from Cognito user pool
+    2. Revoke all local sessions
+    3. Remove all memberships
+    4. Anonymize invitations created by this user
+    5. Delete the User record
+
+    Raises ValueError if the user is a platform admin (must be demoted first)
+    or the last owner of any tenant.
+    """
+    from .cognito_admin_service import admin_delete_user as cognito_delete
+
+    user = get_user_by_id(user_id, db)
+    if not user:
+        raise ValueError(f"User {user_id} not found")
+
+    if user.is_platform_admin:
+        raise ValueError("Cannot delete a platform admin. Demote them first.")
+
+    # Check that the user is not the last owner of any tenant
+    owner_memberships = (
+        db.query(Membership)
+        .filter(
+            Membership.user_id == user_id,
+            Membership.status == "active",
+            Membership.scope_type == "account",
+            Membership.role_name.in_(["owner", "account_owner"]),
+        )
+        .all()
+    )
+    for m in owner_memberships:
+        owner_count = (
+            db.query(Membership)
+            .filter(
+                Membership.scope_type == "account",
+                Membership.scope_id == m.scope_id,
+                Membership.status == "active",
+                Membership.role_name.in_(["owner", "account_owner"]),
+            )
+            .count()
+        )
+        if owner_count <= 1:
+            raise ValueError(
+                f"User is the last owner of tenant {m.scope_id}. Transfer ownership first."
+            )
+
+    # 1. Delete from Cognito
+    cognito_result = cognito_delete(user.email)
+    if "error" in cognito_result:
+        raise ValueError(f"Cognito deletion failed: {cognito_result['error']}")
+
+    # 2. Revoke all sessions
+    db.query(AuthSession).filter(AuthSession.user_id == user_id).delete()
+
+    # 3. Remove all memberships
+    db.query(Membership).filter(Membership.user_id == user_id).delete()
+
+    # 4. Nullify invitations created by this user (preserve audit trail)
+    db.query(Invitation).filter(Invitation.created_by == user_id).update(
+        {"created_by": None}
+    )
+
+    # 5. Delete the user record
+    db.delete(user)
+    db.commit()
+
+    logger.info("Permanently deleted user", extra={"user_id": str(user_id), "email": user.email})
+
+    return {
+        "deleted": True,
+        "user_id": str(user_id),
+        "email": user.email,
+        "cognito_deleted": cognito_result.get("deleted", False),
+    }

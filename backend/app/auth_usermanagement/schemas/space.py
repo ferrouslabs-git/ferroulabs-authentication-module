@@ -29,3 +29,7 @@ class SpaceSuspendResponse(BaseModel):
     status: str
     suspended_at: datetime | None = None
     message: str
+
+
+class SpaceUpdateRequest(BaseModel):
+    name: str | None = Field(None, min_length=1, max_length=255, description="New space name")

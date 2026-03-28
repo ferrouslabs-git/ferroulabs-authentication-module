@@ -372,3 +372,146 @@ def confirm_forgot_password(email: str, code: str, new_password: str) -> dict:
 
         logger.error("Cognito ConfirmForgotPassword failed", extra={"error_code": error_code, "error": error_msg})
         return {"error": f"Password reset failed: {error_msg}"}
+
+
+# ── Admin operations (platform-admin only) ──────────────────────
+
+
+def admin_delete_user(email: str) -> dict:
+    """Permanently delete a user from the Cognito user pool.
+
+    This is irreversible. The caller must handle local DB cleanup separately.
+    """
+    settings = get_settings()
+    client = _get_cognito_client()
+
+    try:
+        client.admin_delete_user(
+            UserPoolId=settings.cognito_user_pool_id,
+            Username=email,
+        )
+        logger.info("Deleted Cognito user", extra={"email": email})
+        return {"deleted": True}
+
+    except ClientError as e:
+        error_code = e.response["Error"]["Code"]
+        error_msg = e.response["Error"]["Message"]
+
+        if error_code == "UserNotFoundException":
+            # Already gone — treat as success
+            logger.info("Cognito user already absent", extra={"email": email})
+            return {"deleted": True, "already_absent": True}
+
+        logger.error("Cognito AdminDeleteUser failed", extra={"email": email, "error_code": error_code, "error": error_msg})
+        return {"error": f"Failed to delete Cognito user: {error_msg}"}
+
+
+def admin_disable_user(email: str) -> dict:
+    """Disable a user in Cognito (prevents all sign-in but preserves the account)."""
+    settings = get_settings()
+    client = _get_cognito_client()
+
+    try:
+        client.admin_disable_user(
+            UserPoolId=settings.cognito_user_pool_id,
+            Username=email,
+        )
+        logger.info("Disabled Cognito user", extra={"email": email})
+        return {"disabled": True}
+
+    except ClientError as e:
+        error_code = e.response["Error"]["Code"]
+        error_msg = e.response["Error"]["Message"]
+
+        if error_code == "UserNotFoundException":
+            return {"error": "User not found in Cognito"}
+
+        logger.error("Cognito AdminDisableUser failed", extra={"email": email, "error_code": error_code, "error": error_msg})
+        return {"error": f"Failed to disable Cognito user: {error_msg}"}
+
+
+def admin_enable_user(email: str) -> dict:
+    """Re-enable a previously disabled Cognito user."""
+    settings = get_settings()
+    client = _get_cognito_client()
+
+    try:
+        client.admin_enable_user(
+            UserPoolId=settings.cognito_user_pool_id,
+            Username=email,
+        )
+        logger.info("Enabled Cognito user", extra={"email": email})
+        return {"enabled": True}
+
+    except ClientError as e:
+        error_code = e.response["Error"]["Code"]
+        error_msg = e.response["Error"]["Message"]
+
+        if error_code == "UserNotFoundException":
+            return {"error": "User not found in Cognito"}
+
+        logger.error("Cognito AdminEnableUser failed", extra={"email": email, "error_code": error_code, "error": error_msg})
+        return {"error": f"Failed to enable Cognito user: {error_msg}"}
+
+
+def admin_get_user(email: str) -> dict:
+    """Look up a user's status and attributes in Cognito."""
+    settings = get_settings()
+    client = _get_cognito_client()
+
+    try:
+        response = client.admin_get_user(
+            UserPoolId=settings.cognito_user_pool_id,
+            Username=email,
+        )
+        attributes = {
+            attr["Name"]: attr["Value"]
+            for attr in response.get("UserAttributes", [])
+        }
+        return {
+            "username": response["Username"],
+            "status": response.get("UserStatus"),
+            "enabled": response.get("Enabled", True),
+            "created_at": response.get("UserCreateDate"),
+            "modified_at": response.get("UserLastModifiedDate"),
+            "attributes": attributes,
+        }
+
+    except ClientError as e:
+        error_code = e.response["Error"]["Code"]
+        error_msg = e.response["Error"]["Message"]
+
+        if error_code == "UserNotFoundException":
+            return {"error": "User not found in Cognito"}
+
+        logger.error("Cognito AdminGetUser failed", extra={"email": email, "error_code": error_code, "error": error_msg})
+        return {"error": f"Failed to get Cognito user: {error_msg}"}
+
+
+def admin_reset_user_password(email: str) -> dict:
+    """Force a password reset — Cognito sends a reset code to the user's email.
+
+    The user must complete the reset flow on their next login.
+    """
+    settings = get_settings()
+    client = _get_cognito_client()
+
+    try:
+        client.admin_reset_user_password(
+            UserPoolId=settings.cognito_user_pool_id,
+            Username=email,
+        )
+        logger.info("Reset Cognito user password", extra={"email": email})
+        return {"reset_initiated": True}
+
+    except ClientError as e:
+        error_code = e.response["Error"]["Code"]
+        error_msg = e.response["Error"]["Message"]
+
+        if error_code == "UserNotFoundException":
+            return {"error": "User not found in Cognito"}
+        if error_code == "InvalidParameterException":
+            return {"error": "Cannot reset password for this user. They may need to confirm their account first."}
+
+        logger.error("Cognito AdminResetUserPassword failed", extra={"email": email, "error_code": error_code, "error": error_msg})
+        return {"error": f"Failed to reset password: {error_msg}"}

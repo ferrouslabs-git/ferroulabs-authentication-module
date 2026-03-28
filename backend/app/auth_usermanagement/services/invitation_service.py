@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from ..models.invitation import Invitation
 from ..models.membership import Membership
 from ..models.user import User
+from ..models.tenant import Tenant
 from .auth_config_loader import get_auth_config
 
 
@@ -176,6 +177,14 @@ def get_tenant_invitation_by_token(db: Session, tenant_id: UUID, token: str) -> 
     ).first()
 
 
+def get_invitation_by_id(db: Session, tenant_id: UUID, invitation_id: UUID) -> Invitation | None:
+    """Return invitation by its database ID scoped to a tenant."""
+    return db.query(Invitation).filter(
+        Invitation.id == invitation_id,
+        Invitation.tenant_id == tenant_id,
+    ).first()
+
+
 def resend_invitation(
     db: Session,
     invitation: Invitation,
@@ -225,3 +234,39 @@ def revoke_invitation(db: Session, invitation: Invitation) -> Invitation:
     db.commit()
     db.refresh(invitation)
     return invitation
+
+
+def list_tenant_invitations(
+    db: Session,
+    tenant_id: UUID,
+    *,
+    status_filter: str | None = None,
+) -> list[dict]:
+    """List invitations for a tenant, optionally filtered by status."""
+    # Verify tenant exists
+    tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
+    if not tenant:
+        raise ValueError(f"Tenant not found: {tenant_id}")
+
+    query = db.query(Invitation).filter(Invitation.tenant_id == tenant_id)
+    invitations = query.order_by(Invitation.created_at.desc()).all()
+
+    results = []
+    for inv in invitations:
+        inv_status = inv.status  # computed property
+        if status_filter and inv_status != status_filter:
+            continue
+        results.append({
+            "invitation_id": inv.id,
+            "tenant_id": inv.tenant_id,
+            "email": inv.email,
+            "role": inv.target_role_name,
+            "status": inv_status,
+            "target_scope_type": inv.target_scope_type,
+            "target_scope_id": inv.target_scope_id,
+            "created_at": inv.created_at,
+            "expires_at": inv.expires_at,
+            "accepted_at": inv.accepted_at,
+            "revoked_at": inv.revoked_at,
+        })
+    return results

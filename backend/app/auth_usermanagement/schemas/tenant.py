@@ -93,6 +93,42 @@ class TenantStatusResponse(BaseModel):
     message: str
 
 
+class TenantUpdateRequest(BaseModel):
+    """Schema for updating tenant fields. At least one field must be provided."""
+    name: str | None = Field(None, min_length=1, max_length=255, description="New tenant name")
+    plan: str | None = Field(None, description="New pricing plan")
+
+
+class TenantDetailResponse(BaseModel):
+    """Schema for single tenant detail with membership stats."""
+    id: UUID
+    name: str
+    plan: str
+    status: str
+    created_at: datetime
+    updated_at: datetime
+    member_count: int
+    owner_count: int
+
+    class Config:
+        from_attributes = True
+
+
+class TenantInvitationListResponse(BaseModel):
+    """Schema for listing invitations within a tenant."""
+    invitation_id: UUID
+    tenant_id: UUID
+    email: str
+    role: str
+    status: str
+    target_scope_type: str | None = None
+    target_scope_id: UUID | None = None
+    created_at: datetime
+    expires_at: datetime
+    accepted_at: datetime | None = None
+    revoked_at: datetime | None = None
+
+
 class PlatformTenantResponse(BaseModel):
     tenant_id: UUID
     name: str
