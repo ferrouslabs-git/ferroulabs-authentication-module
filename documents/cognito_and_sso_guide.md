@@ -22,6 +22,7 @@ This section documents the working Cognito configuration for email/password auth
 2. Authentication flows:
    - Authorization code grant (PKCE)
    - Refresh token auth
+   - `ALLOW_USER_PASSWORD_AUTH` — **required only if using `AUTH_MODE=custom_ui`** (app-owned login forms instead of Hosted UI)
 3. Token durations:
    - Access token: 60 minutes
    - ID token: 60 minutes
@@ -92,6 +93,8 @@ curl.exe -i -H "Authorization: Bearer $($tokenResponse.id_token)" http://localho
 ```
 
 Expected: HTTP 200 with `status: valid`.
+
+> **Custom UI alternative:** If you don't want to use the Cognito Hosted UI, set `AUTH_MODE=custom_ui` in your backend `.env` and `VITE_AUTH_MODE=custom_ui` in your frontend `.env`. This enables app-owned login, signup, and forgot-password forms that proxy Cognito API calls through your backend. See the [Custom UI Integration Guide](custom_ui_integration_guide.md) for full setup details.
 
 **Using the frontend:**
 1. Start backend: `cd backend && uvicorn app.main:app --port 8001 --reload`

@@ -11,8 +11,10 @@ Last updated: 2026-03-23
 | [setup_guide.md](setup_guide.md) | Step-by-step integration into a new host project (DB wiring, middleware, env vars, migrations, frontend, Docker, cleanup) | Developers |
 | [agent_reference.md](agent_reference.md) | AI agent / developer technical reference — file tree, data model, permission system, API endpoints, service signatures, invariants | AI agents, developers |
 | [cognito_and_sso_guide.md](cognito_and_sso_guide.md) | AWS Cognito base setup, SSO provider configuration (Google / Azure), federation wiring, multi-tenant SSO planning | Developers, ops |
-| [Custom UI Integration Guide](../docs/custom_ui_integration_guide.md) | Building custom login/signup UI instead of Cognito Hosted UI (`AUTH_MODE=custom_ui`) | Developers |
+| [Custom UI Integration Guide](custom_ui_integration_guide.md) | Building custom login/signup UI instead of Cognito Hosted UI (`AUTH_MODE=custom_ui`) | Developers |
+| [submodule_integration_guide.md](submodule_integration_guide.md) | Using this repo as a Git submodule instead of copy-pasting files into host apps | Developers |
 | [version_1_fullreport.md](version_1_fullreport.md) | Complete system report — architecture, security model, data model, test coverage, change history | All |
+| [module_blueprint.md](module_blueprint.md) | Template for building new reusable modules following the same architecture as auth_usermanagement | AI agents, developers |
 
 ## Archived
 
@@ -85,7 +87,7 @@ npm run build
 - `/backend` - FastAPI application
 - `/frontend` - React + Vite application
 - `/documents` - This folder (planning & documentation)
-- `/docs` - Code documentation (auth_rules.md)
+- `/documents` - All project documentation consolidated in one folder
 
 **Database:** PostgreSQL (currently local, migration to RDS pending)
 

@@ -14,7 +14,7 @@
 - **ORM**: SQLAlchemy 2.0
 - **Permission Model**: YAML-driven roles → resolved permission strings
 - **Frontend**: React (hooks + context), Vite bundler
-- **Tests**: 294 backend (SQLite) + 56 frontend
+- **Tests**: 300 backend (SQLite) + 56 frontend
 
 ---
 
@@ -38,7 +38,7 @@ backend/
 │       │   ├── custom_ui_routes.py      # /custom/login, /signup, /confirm, /set-password, /forgot-password (AUTH_MODE=custom_ui only)
 │       │   ├── invitation_routes.py     # /invite, /invites/accept, /invites/{token}
 │       │   ├── permission_demo_routes.py
-│       │   ├── platform_tenant_routes.py # /accounts, /accounts/{id}/suspend
+│       │   ├── platform_tenant_routes.py # /platform/tenants, /platform/tenants/{id}/suspend, /platform/invitations/failed
 │       │   ├── platform_user_routes.py  # /platform/users, suspend/unsuspend
 │       │   ├── refresh_token_routes.py  # /token/refresh, /cookie/store-refresh
 │       │   ├── route_helpers.py         # Shared helpers (ensure_scope_access, invitation response)
@@ -673,12 +673,15 @@ All prefixed with `AUTH_API_PREFIX` (default: `/auth`).
 
 | Method | Path | Purpose |
 |---|---|---|
-| `GET` | `/accounts` | List all tenants |
-| `POST` | `/accounts/{id}/suspend` | Suspend tenant |
-| `POST` | `/accounts/{id}/unsuspend` | Unsuspend tenant |
+| `GET` | `/platform/tenants` | List all tenants |
+| `PATCH` | `/platform/tenants/{id}/suspend` | Suspend tenant |
+| `PATCH` | `/platform/tenants/{id}/unsuspend` | Unsuspend tenant |
+| `GET` | `/platform/invitations/failed` | List failed invitation emails |
 | `GET` | `/platform/users` | List all users |
-| `POST` | `/platform/users/{id}/suspend` | Suspend user |
-| `POST` | `/platform/users/{id}/unsuspend` | Unsuspend user |
+| `PATCH` | `/users/{id}/suspend` | Suspend user |
+| `PATCH` | `/users/{id}/unsuspend` | Unsuspend user |
+| `PATCH` | `/platform/users/{id}/promote` | Promote to platform admin |
+| `PATCH` | `/platform/users/{id}/demote` | Demote from platform admin |
 
 ---
 
@@ -816,6 +819,10 @@ useSpace              // Space management
 
 // Components
 LoginForm             // Cognito hosted UI login trigger
+CustomLoginForm       // Custom UI email+password login (AUTH_MODE=custom_ui)
+CustomSignupForm      // Custom UI self-service registration
+ForgotPasswordForm    // Custom UI password reset flow
+InviteSetPassword     // Custom UI set-password for invited users
 ProtectedRoute        // Route guard (redirects if not authed)
 TenantSwitcher        // Dropdown for switching active tenant
 RoleSelector          // Role assignment UI
@@ -829,6 +836,7 @@ AdminDashboard        // Platform admin page
 // Services
 authApi               // Backend API calls
 cognitoClient         // Cognito OAuth helpers (openHostedLogin, openHostedSignup)
+customAuthApi         // Custom UI API calls (login, signup, forgot-password, etc.)
 
 // Config
 AUTH_CONFIG            // Frontend auth configuration

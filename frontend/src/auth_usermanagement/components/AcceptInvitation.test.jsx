@@ -31,8 +31,19 @@ const apiMocks = vi.hoisted(() => ({
 
 vi.mock("../services/authApi", () => apiMocks);
 
+const configMock = vi.hoisted(() => ({
+  AUTH_CONFIG: { authMode: "hosted_ui", apiBasePath: "/auth", namespace: "authum", callbackPath: "/callback", invitePathPrefix: "/invite/", csrfCookieName: "authum_csrf_token" },
+  STORAGE_KEYS: { tenantId: "authum_tenant_id", postLoginRedirect: "authum_post_login_redirect", pkceCodeVerifier: "authum_pkce_code_verifier" },
+  isBrowser: true,
+}));
+vi.mock("../config", () => configMock);
+
 vi.mock("./LoginForm", () => ({
   LoginForm: () => <div data-testid="login-form">LoginForm</div>,
+}));
+
+vi.mock("./InviteSetPassword", () => ({
+  InviteSetPassword: ({ email }) => <div data-testid="invite-set-password">InviteSetPassword for {email}</div>,
 }));
 
 // Import component AFTER mocks
@@ -44,6 +55,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   authState.user = null;
   authState.token = null;
+  configMock.AUTH_CONFIG.authMode = "hosted_ui";
   localStorage.clear();
 });
 
@@ -186,6 +198,23 @@ describe("AcceptInvitation", () => {
       expect(apiMocks.acceptInvitation).toHaveBeenCalledWith("tok-1", "invite-tok-abc");
       expect(authState.refreshAuthState).toHaveBeenCalled();
       expect(navigateMock).toHaveBeenCalledWith("/", { replace: true });
+    });
+  });
+
+  it("shows InviteSetPassword in custom_ui mode when not authenticated", async () => {
+    configMock.AUTH_CONFIG.authMode = "custom_ui";
+
+    apiMocks.getInvitationDetails.mockResolvedValue({
+      tenant_name: "Acme",
+      email: "test@example.com",
+      role: "member",
+      is_expired: false,
+      is_accepted: false,
+    });
+
+    render(<AcceptInvitation />);
+    await waitFor(() => {
+      expect(screen.getByTestId("invite-set-password")).toBeInTheDocument();
     });
   });
 

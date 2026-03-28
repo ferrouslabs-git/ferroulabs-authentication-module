@@ -43,7 +43,7 @@ All detailed documentation lives in [`documents/`](documents/):
 |----------|---------|
 | [Setup Guide](documents/setup_guide.md) | Step-by-step integration into a new host project |
 | [Agent Reference](documents/agent_reference.md) | AI agent / developer technical reference |
-| [Custom UI Guide](docs/custom_ui_integration_guide.md) | Build custom login/signup forms instead of Cognito Hosted UI |
+| [Custom UI Guide](documents/custom_ui_integration_guide.md) | Build custom login/signup forms instead of Cognito Hosted UI |
 | [Cognito & SSO Guide](documents/cognito_and_sso_guide.md) | AWS Cognito setup and SSO federation planning |
 | [Version 1 Report](documents/version_1_fullreport.md) | Full system documentation, security model, and changelog |
 

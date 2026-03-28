@@ -36,6 +36,8 @@ alembic==1.13.1
 
 Copy `backend/app/auth_usermanagement/` into your host project. The module is entirely self-contained — it brings its own models, routes, middleware, services, and schemas.
 
+> **Alternative — Git submodule:** Instead of copying, you can add this repo as a Git submodule and use symlinks. This makes pulling upstream updates a single command. See [submodule_integration_guide.md](submodule_integration_guide.md) for full setup.
+
 Your host project structure should look like:
 
 ```
@@ -219,7 +221,7 @@ AUTH_NAMESPACE=authum
 # AUTH_MODE=custom_ui
 ```
 
-> **Custom UI mode:** Set `AUTH_MODE=custom_ui` to enable app-owned login/signup forms instead of Cognito Hosted UI redirects. Also enable `ALLOW_USER_PASSWORD_AUTH` on your Cognito app client. See the [Custom UI Integration Guide](../docs/custom_ui_integration_guide.md) for full details.
+> **Custom UI mode:** Set `AUTH_MODE=custom_ui` to enable app-owned login/signup forms instead of Cognito Hosted UI redirects. Also enable `ALLOW_USER_PASSWORD_AUTH` on your Cognito app client. See the [Custom UI Integration Guide](custom_ui_integration_guide.md) for full details.
 
 ---
 

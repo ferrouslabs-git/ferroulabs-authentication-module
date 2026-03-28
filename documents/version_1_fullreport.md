@@ -21,6 +21,7 @@ Source of truth: code only (no assumptions from planning docs)
             __init__.py                 # Router composition
             auth_routes.py              # /sync, /debug-token, /me
             config_routes.py            # /config/roles, /config/permissions
+            custom_ui_routes.py         # /custom/login, /signup, /confirm, /set-password, /forgot-password (AUTH_MODE=custom_ui only)
             invitation_routes.py        # /invite, /invites/accept, /invites/{token}
             permission_demo_routes.py
             platform_tenant_routes.py   # /platform/tenants, suspend/unsuspend, /invitations/failed
@@ -67,6 +68,7 @@ Source of truth: code only (no assumptions from planning docs)
             audit_service.py
             auth_config_loader.py       # YAML parser, AuthConfig class
             cleanup_service.py          # Purge expired tokens, invitations, rate-limit hits, audit events
+            cognito_admin_service.py    # Cognito Admin API (custom_ui): create invited users, initiate auth, forgot password
             cookie_token_service.py
             email_service.py            # SES invitation emails
             invitation_service.py
@@ -86,7 +88,7 @@ Source of truth: code only (no assumptions from planning docs)
         database.py                     # Host DB: engine, SessionLocal, Base, get_db()
       alembic/
         env.py                          # Host migration runner
-        versions/                       # 17 migration files (see section 13)
+        versions/                       # 18 migration files (see section 14)
 
 ### 1.3 Frontend module structure
 
@@ -109,6 +111,7 @@ Source of truth: code only (no assumptions from planning docs)
           services/
             authApi.js                  # Backend API client (axios)
             cognitoClient.js            # Cognito OAuth helpers (PKCE)
+            customAuthApi.js            # Custom UI API calls (login, signup, forgot-password, etc.)
           utils/
             errorHandling.js
             index.js
@@ -124,6 +127,10 @@ Source of truth: code only (no assumptions from planning docs)
             TenantSwitcher.jsx
             Toast.jsx
             UserList.jsx
+            CustomLoginForm.jsx         # Custom UI email+password login
+            CustomSignupForm.jsx        # Custom UI self-service registration
+            ForgotPasswordForm.jsx      # Custom UI password reset flow
+            InviteSetPassword.jsx       # Custom UI set-password for invited users
           pages/
             AdminDashboard.jsx
             index.js
@@ -145,6 +152,7 @@ What it does in code:
 - Platform-admin operations for users and tenants.
 - Row-level security (PostgreSQL) for tenant isolation.
 - Automated cleanup service for expired data (tokens, invitations, rate-limit hits, audit events).
+- Dual-mode auth: Cognito Hosted UI (default) or Custom UI with app-owned login/signup/forgot-password forms.
 - Cognito AdminUserGlobalSignOut on user suspension.
 - Frontend AuthProvider + hooks + admin UI components.
 
@@ -187,6 +195,7 @@ From backend/app/auth_usermanagement/api/__init__.py:
   - platform_user_routes
   - platform_tenant_routes
   - refresh_token_routes
+  - custom_ui_routes
 
 ### 3.3 Domain layering
 
@@ -284,6 +293,17 @@ From permission_demo_routes.py:
 - GET /auth/viewer/reports
 - GET /auth/permissions/check
 
+### 4.11 Custom UI endpoints (AUTH_MODE=custom_ui only)
+
+From custom_ui_routes.py (all return 404 when AUTH_MODE != "custom_ui"):
+- POST /auth/custom/login
+- POST /auth/custom/signup
+- POST /auth/custom/confirm
+- POST /auth/custom/set-password
+- POST /auth/custom/resend-code
+- POST /auth/custom/forgot-password
+- POST /auth/custom/confirm-forgot-password
+
 ---
 
 ## 5. Data Model and Security-Critical Fields
@@ -380,7 +400,7 @@ Cookie attributes:
 | Cookie | HttpOnly | Secure | SameSite | Path | Max-Age |
 |--------|----------|--------|----------|------|---------|
 | Refresh token (authum_refresh_token) | Yes | Yes (prod) | Strict | /auth/token | 30 days |
-| CSRF token (authum_csrf_token) | No | Yes (prod) | Strict | /auth/token | 30 days |
+| CSRF token (authum_csrf_token) | No | Yes (prod) | Strict | / | 30 days |
 
 Secure controlled by COOKIE_SECURE env var (false for local HTTP dev).
 
@@ -525,6 +545,7 @@ From backend/app/auth_usermanagement/config.py:
 - AUTH_COOKIE_PATH
 - AUTH_CSRF_COOKIE_NAME
 - AUTH_CONFIG_PATH (path to auth_config.yaml)
+- AUTH_MODE (hosted_ui or custom_ui, default hosted_ui)
 
 From backend/app/database.py:
 - DATABASE_URL
@@ -543,10 +564,7 @@ From frontend/src/auth_usermanagement/config.js and services/cognitoClient.js:
 - VITE_AUTH_CALLBACK_PATH
 - VITE_AUTH_INVITE_PATH_PREFIX
 - VITE_AUTH_CSRF_COOKIE_NAME
-
----
-
-## 9. Database Ownership and Host Contract
+- VITE_AUTH_MODE (hosted_ui or custom_ui, default hosted_ui)
 
 ### 9.1 Host-owned runtime
 
@@ -668,7 +686,7 @@ Frontend:
 
 ## 12. Test Coverage
 
-### Backend (261 tests on SQLite, 262 on PostgreSQL)
+### Backend (300 tests on SQLite, 301 on PostgreSQL)
 
 - DB ownership boundary and guardrail tests
 - Scope context and permission guard tests
@@ -684,6 +702,7 @@ Frontend:
 - Config loader tests
 - Cleanup service tests (9 tests)
 - JWKS cache TTL tests
+- Custom UI auth tests (login, signup, set-password, forgot-password, Cognito admin service)
 - API prefix versioning test
 - Row-level security tests (PostgreSQL-only, 6 tests)
 
@@ -878,6 +897,18 @@ Verified against PostgreSQL 17.6 on AWS RDS.
 - Cleanup service verified against real PostgreSQL data.
 - 261 backend tests passing (SQLite), 262 on PostgreSQL.
 
+### Custom UI — 2026-03-28
+
+- Dual-mode auth via AUTH_MODE env var: "hosted_ui" (default, Cognito redirect) or "custom_ui" (app-owned forms).
+- Backend: cognito_admin_service.py (Cognito Admin API proxy), custom_ui_routes.py (7 endpoints gated by AUTH_MODE).
+- Endpoints: /custom/login, /custom/signup, /custom/confirm, /custom/set-password, /custom/resend-code, /custom/forgot-password, /custom/confirm-forgot-password.
+- Frontend: CustomLoginForm, CustomSignupForm, InviteSetPassword, ForgotPasswordForm components; customAuthApi.js service.
+- Tenant middleware updated: /auth/custom/* paths skip tenant header validation (pre-authentication endpoints).
+- CSRF cookie path changed from /auth/token to / (JS must read from any page URL).
+- Frontend role recognition updated for v3.0 names (account_owner, account_admin, account_member) alongside legacy names.
+- Cognito requires ALLOW_USER_PASSWORD_AUTH enabled on app client for custom_ui mode.
+- 300 backend tests passing (SQLite), 301 on PostgreSQL.
+
 ---
 
 ## 18. Final Assessment
@@ -886,6 +917,7 @@ The codebase implements a production-ready auth/user-management module for multi
 
 Readiness strengths:
 - Three-layer scope-based RBAC with YAML-driven permissions.
+- Dual-mode auth: Cognito Hosted UI or Custom UI with app-owned forms.
 - Cookie-based refresh with CSRF hardening.
 - Session lifecycle and audit persistence.
 - PostgreSQL RLS verified on real infrastructure.
