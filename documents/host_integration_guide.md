@@ -16,6 +16,7 @@ This guide covers:
 4. [Handling an existing users table](#4-existing-users-table) — migration strategies
 5. [Service hooks and event patterns](#5-service-hooks) — reacting to user/tenant changes
 6. [Working examples](#6-working-examples) — concrete patterns for common scenarios
+7. [Frontend integration](#7-frontend-integration) — what ships to host vs what's demo-only, styling
 
 ---
 
@@ -451,9 +452,129 @@ tenants (module)          ← "Team"
 
 ---
 
+## 7. Frontend Integration
+
+### What ships to the host app
+
+Only `frontend/src/auth_usermanagement/` ships to your host. Everything else in `frontend/src/` is a demo sandbox.
+
+| Ship to host? | Path | Purpose |
+|:---:|------|---------|
+| **YES** | `auth_usermanagement/` | Reusable auth module |
+| NO | `App.jsx` | Demo shell with "FerrousLabs" branding |
+| NO | `main.jsx` | Demo entry point |
+| NO | `App.admin-routing.test.jsx` | Test for the demo shell |
+| NO | `mockapp/` | Empty — prototyping placeholder |
+| NO | `mockup/` | Empty — prototyping placeholder |
+
+### Inside auth_usermanagement/ — what's style-free vs styled
+
+**No styles (use directly, host provides all styling):**
+
+| File | Purpose | Styling approach |
+|------|---------|-----------------|
+| `config.js` | Env-driven config | Pure logic |
+| `constants/permissions.js` | Permission constants | Pure logic |
+| `utils/errorHandling.js` | Error message helpers | Pure logic |
+| `services/authApi.js` | Backend API client | Pure logic |
+| `services/cognitoClient.js` | Cognito PKCE client | Pure logic |
+| `services/customAuthApi.js` | Custom UI API client | Pure logic |
+| `context/AuthProvider.jsx` | Auth state provider | No UI output |
+| `hooks/*` | `useAuth`, `useTenant`, `useRole`, `useSpace`, `useCurrentUser` | No UI output |
+| `components/ProtectedRoute.jsx` | Route guard | No styles — renders `children` or `fallback` |
+| `components/TenantSwitcher.jsx` | Tenant dropdown | Accepts `className` prop, no inline styles |
+| `components/RoleSelector.jsx` | Role dropdown | Accepts `className` prop, no inline styles |
+
+**Have inline styles (functional but opinionated UI):**
+
+| File | Purpose | Host strategy |
+|------|---------|---------------|
+| `components/CustomLoginForm.jsx` | Login form | Override with `className` prop or replace entirely |
+| `components/CustomSignupForm.jsx` | Signup form | Override or replace |
+| `components/ForgotPasswordForm.jsx` | Password reset form | Override or replace |
+| `components/InviteSetPassword.jsx` | Invited user password set | Override or replace |
+| `components/LoginForm.jsx` | Hosted UI login trigger | Minimal styles — minor override |
+| `components/AcceptInvitation.jsx` | Invitation acceptance flow | Override or replace |
+| `components/InviteUserModal.jsx` | Invite user modal | Override or replace |
+| `components/UserList.jsx` | User management table | Override or replace |
+| `components/SessionPanel.jsx` | Session management | Override or replace |
+| `components/PlatformTenantPanel.jsx` | Platform admin tenant list | Override or replace |
+| `components/ConfirmDialog.jsx` | Confirmation modal | Override or replace |
+| `components/Toast.jsx` | Toast notifications | Override or replace |
+| `pages/AdminDashboard.jsx` | Admin page layout | Host typically replaces entirely |
+
+### Styling strategies
+
+**Option A — Replace styled components (recommended for production apps):**
+
+Use the hooks and services directly. Build your own UI components styled with your design system:
+
+```jsx
+import { useAuth, useTenant, useRole } from "./auth_usermanagement";
+import { customLogin } from "./auth_usermanagement/services/customAuthApi";
+
+function MyLoginForm() {
+  // Your own styled form that calls customLogin()
+}
+```
+
+Components you'd most likely keep as-is: `AuthProvider`, all hooks, all services, `ProtectedRoute`, `TenantSwitcher`, `RoleSelector`.
+
+Components you'd most likely replace: `AdminDashboard`, `UserList`, `SessionPanel`, `CustomLoginForm`, `CustomSignupForm`, `Toast`.
+
+**Option B — Override with className (quick start):**
+
+Many components accept a `className` prop. Use CSS specificity to override inline styles:
+
+```jsx
+<CustomLoginForm
+  className="my-login-form"
+  onSuccess={handleSuccess}
+  onSwitchToSignup={() => setView("signup")}
+/>
+```
+
+```css
+.my-login-form input { /* your styles */ }
+.my-login-form button { /* your styles */ }
+```
+
+**Option C — Use as-is (prototyping only):**
+
+The inline styles provide a functional, neutral UI suitable for prototyping. Not recommended for production.
+
+### Minimal host setup
+
+```jsx
+// Host main.jsx
+import { AuthProvider } from "./auth_usermanagement";
+
+ReactDOM.createRoot(document.getElementById("root")).render(
+  <BrowserRouter>
+    <AuthProvider>
+      <App />
+    </AuthProvider>
+  </BrowserRouter>
+);
+```
+
+```jsx
+// Host App.jsx — use hooks and services, build your own UI
+import { useAuth, useTenant, ProtectedRoute } from "./auth_usermanagement";
+
+function App() {
+  const { isAuthenticated, logout } = useAuth();
+  const { tenant, tenants, changeTenant } = useTenant();
+  // ... your routes and layout
+}
+```
+
+---
+
 ## Related Docs
 
 - [Setup Guide](setup_guide.md) — step-by-step first-time integration
 - [Agent Reference](agent_reference.md) — complete API and data model reference
 - [Custom UI Guide](custom_ui_integration_guide.md) — building your own login forms
 - [Cognito & SSO Guide](cognito_and_sso_guide.md) — AWS Cognito setup
+- [Submodule Integration Guide](submodule_integration_guide.md) — Git submodule setup and multi-module migrations

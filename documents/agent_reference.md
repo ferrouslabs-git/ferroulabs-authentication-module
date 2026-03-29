@@ -147,17 +147,37 @@ backend/
 │   └── test_user_suspension.py
 frontend/
 ├── src/
-│   ├── App.jsx
-│   ├── main.jsx
-│   └── auth_usermanagement/
+│   ├── App.jsx                          # DEMO ONLY — sandbox shell, do NOT ship to host
+│   ├── main.jsx                         # DEMO ONLY — sandbox entry point
+│   ├── App.admin-routing.test.jsx       # DEMO ONLY — test for sandbox routing
+│   ├── mockapp/                         # DEMO ONLY — empty, for prototyping
+│   ├── mockup/                          # DEMO ONLY — empty, for prototyping
+│   └── auth_usermanagement/             # ✅ SHIP THIS FOLDER to host app
 │       ├── index.js                     # Public exports
-│       ├── config.js
-│       ├── components/                  # LoginForm, ProtectedRoute, TenantSwitcher, CustomLoginForm, CustomSignupForm, InviteSetPassword, ForgotPasswordForm, etc.
+│       ├── config.js                    # Env-driven config (no styles)
+│       ├── config.test.js               # Config tests
+│       ├── constants/                   # permissions.js — permission constants (no styles)
+│       ├── components/                  # UI components (see host_integration_guide.md §7 for styling notes)
+│       │   ├── AcceptInvitation.jsx     # Invitation flow (inline styles — override with className)
+│       │   ├── ConfirmDialog.jsx        # Modal dialog (inline styles)
+│       │   ├── CustomLoginForm.jsx      # Custom UI login (inline styles — override with className)
+│       │   ├── CustomSignupForm.jsx     # Custom UI signup (inline styles)
+│       │   ├── ForgotPasswordForm.jsx   # Password reset (inline styles)
+│       │   ├── InviteSetPassword.jsx    # Invited user password set (inline styles)
+│       │   ├── InviteUserModal.jsx      # Invite user form (inline styles)
+│       │   ├── LoginForm.jsx            # Hosted UI login (minimal inline styles)
+│       │   ├── PlatformTenantPanel.jsx  # Platform admin tenant list (inline styles)
+│       │   ├── ProtectedRoute.jsx       # Route guard (NO styles — accepts className)
+│       │   ├── RoleSelector.jsx         # Role dropdown (NO styles — accepts className)
+│       │   ├── SessionPanel.jsx         # Session management (inline styles)
+│       │   ├── TenantSwitcher.jsx       # Tenant dropdown (NO styles — accepts className)
+│       │   ├── Toast.jsx                # Toast notifications (inline styles)
+│       │   └── UserList.jsx             # User list + management (inline styles)
 │       ├── context/                     # AuthProvider
 │       ├── hooks/                       # useAuth, useCurrentUser, useTenant, useRole, useSpace
-│       ├── pages/                       # AdminDashboard
-│       ├── services/                    # authApi, cognitoClient, customAuthApi
-│       └── utils/
+│       ├── pages/                       # AdminDashboard (inline styles — host typically replaces)
+│       ├── services/                    # authApi, cognitoClient, customAuthApi (no styles)
+│       └── utils/                       # errorHandling.js (no styles)
 ```
 
 ---

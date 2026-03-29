@@ -124,6 +124,61 @@ alembic merge heads -m "merge host and auth module migrations"
 
 > **Alternative — Symlink (module-only migrations):** If your host app has no migrations of its own, you can skip `version_locations` and instead symlink the entire versions folder: `ln -s ../../vendor/ferrouslabs-auth-system/backend/alembic/versions backend/alembic/versions`. This is simpler but doesn't scale once you add host-side tables.
 
+#### Multi-module migration setup
+
+If your host app uses **multiple reusable modules** (e.g., auth + billing + analytics), each with their own migration files, extend `version_locations` to include all of them:
+
+```ini
+# alembic.ini — host app with multiple modules
+[alembic]
+script_location = %(here)s/alembic
+
+version_locations =
+    %(here)s/alembic/versions
+    %(here)s/vendor/ferrouslabs-auth-system/backend/alembic/versions
+    %(here)s/vendor/billing-module/backend/alembic/versions
+    %(here)s/vendor/analytics-module/backend/alembic/versions
+```
+
+In `alembic/env.py`, import **all** models so Alembic's autogenerate can detect every table:
+
+```python
+from app.database import Base, DATABASE_URL
+
+# Auth module models
+from app.auth_usermanagement.models import *
+
+# Other module models
+from app.billing.models import *
+from app.analytics.models import *
+
+# Host's own models
+from app.models import *
+```
+
+**Cross-module migration dependencies:** If a host migration needs an auth table to exist first (e.g., adding a FK to `tenants.id`), use `depends_on` in the migration file:
+
+```python
+"""add tenant_id to projects table"""
+
+revision = "abc123"
+down_revision = "host_previous_rev"
+depends_on = "d3494139f54d"  # auth module's create_auth_tables migration
+
+def upgrade():
+    op.add_column("projects", sa.Column("tenant_id", sa.UUID(), sa.ForeignKey("tenants.id")))
+```
+
+**New migrations always land in the first path** in `version_locations`. When you run `alembic revision --autogenerate -m "add projects table"`, the file goes into your host's `alembic/versions/`, not into any module's folder.
+
+**Multiple heads:** When independent migration chains exist (host + auth + billing), Alembic will report multiple heads. Merge them:
+
+```bash
+alembic merge heads -m "merge host and module migrations"
+```
+
+This creates a single merge-point migration. Subsequent `alembic upgrade head` runs linearly from there.
+
 ### 4. Create the frontend symlink
 
 ```bash
