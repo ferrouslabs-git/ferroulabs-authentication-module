@@ -310,7 +310,7 @@ class TestInvitationCognitoPreCreation:
              patch("app.auth_usermanagement.api.route_helpers.send_invitation_email", mock_email), \
              patch("app.auth_usermanagement.api.route_helpers.log_audit_event"), \
              patch("app.auth_usermanagement.services.cognito_admin_service.create_invited_cognito_user", mock_cognito):
-            result = asyncio.get_event_loop().run_until_complete(
+            result = asyncio.run(
                 create_invitation_response(MagicMock(), tenant_id, invite_data, current_user)
             )
 
@@ -363,7 +363,7 @@ class TestInvitationCognitoPreCreation:
              patch("app.auth_usermanagement.api.route_helpers.send_invitation_email", mock_email), \
              patch("app.auth_usermanagement.api.route_helpers.log_audit_event"), \
              patch("app.auth_usermanagement.services.cognito_admin_service.create_invited_cognito_user", mock_cognito):
-            result = asyncio.get_event_loop().run_until_complete(
+            result = asyncio.run(
                 create_invitation_response(MagicMock(), tenant_id, invite_data, current_user)
             )
 

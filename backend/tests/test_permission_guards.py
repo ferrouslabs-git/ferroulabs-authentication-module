@@ -173,52 +173,68 @@ def test_deprecated_require_admin_passes_for_owner():
 
 def test_deprecated_require_admin_passes_for_admin():
     ctx = _tenant_ctx(role="admin")
-    result = require_admin(ctx)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)
+        result = require_admin(ctx)
     assert result.role == "admin"
 
 
 def test_deprecated_require_admin_blocks_viewer():
     ctx = _tenant_ctx(role="viewer")
-    with pytest.raises(HTTPException) as exc:
-        require_admin(ctx)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)
+        with pytest.raises(HTTPException) as exc:
+            require_admin(ctx)
     assert exc.value.status_code == 403
 
 
 def test_deprecated_require_viewer_passes_for_viewer():
     ctx = _tenant_ctx(role="viewer")
-    result = require_viewer(ctx)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)
+        result = require_viewer(ctx)
     assert result.role == "viewer"
 
 
 def test_deprecated_require_owner_passes_for_owner():
     ctx = _tenant_ctx(role="owner")
-    result = require_owner(ctx)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)
+        result = require_owner(ctx)
     assert result.role == "owner"
 
 
 def test_deprecated_require_owner_blocks_admin():
     ctx = _tenant_ctx(role="admin")
-    with pytest.raises(HTTPException) as exc:
-        require_owner(ctx)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)
+        with pytest.raises(HTTPException) as exc:
+            require_owner(ctx)
     assert exc.value.status_code == 403
 
 
 def test_deprecated_require_member_passes_for_member():
     ctx = _tenant_ctx(role="member")
-    result = require_member(ctx)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)
+        result = require_member(ctx)
     assert result.role == "member"
 
 
 def test_deprecated_require_member_blocks_viewer():
     ctx = _tenant_ctx(role="viewer")
-    with pytest.raises(HTTPException) as exc:
-        require_member(ctx)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)
+        with pytest.raises(HTTPException) as exc:
+            require_member(ctx)
     assert exc.value.status_code == 403
 
 
 def test_deprecated_require_admin_passes_for_platform_admin():
     ctx = _tenant_ctx(role=None, is_platform_admin=True)
-    result = require_admin(ctx)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)
+        result = require_admin(ctx)
     assert result.is_platform_admin is True
 
 

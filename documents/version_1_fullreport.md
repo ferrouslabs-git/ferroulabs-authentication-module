@@ -1,6 +1,6 @@
 # Version 1 Full Report: Auth and User Management
 
-Date: 2026-03-23 (updated)
+Date: 2026-03-28 (updated)
 Scope: backend + frontend auth_usermanagement module
 Source of truth: code only (no assumptions from planning docs)
 
@@ -17,6 +17,7 @@ Source of truth: code only (no assumptions from planning docs)
           auth_config.yaml              # Role + permission definitions (v3.0 scope arch)
           config.py                     # Module settings (Cognito, SES, prefixes)
           database.py                   # Bridge: re-exports host DB objects
+          logging_config.py             # JSON structured logging (auto-configured on import)
           api/
             __init__.py                 # Router composition
             auth_routes.py              # /sync, /debug-token, /me
@@ -706,7 +707,7 @@ Frontend:
 
 ## 12. Test Coverage
 
-### Backend (381 tests on SQLite, 382 on PostgreSQL)
+### Backend (597 tests, 95% coverage, 6 skipped RLS tests without PostgreSQL)
 
 - DB ownership boundary and guardrail tests
 - Scope context and permission guard tests
@@ -719,12 +720,23 @@ Frontend:
 - User management and suspension tests
 - Audit service tests
 - Membership backfill tests
-- Config loader tests
+- Config loader and config routes API tests
 - Cleanup service tests (9 tests)
-- JWKS cache TTL tests
+- JWT verifier tests
 - Custom UI auth tests (login, signup, set-password, forgot-password, Cognito admin service)
+- Cognito admin operations tests
 - API prefix versioning test
+- Auth routes API and e2e lifecycle tests
+- Cross-feature integration tests
+- Email service tests
+- Security headers middleware tests
+- Space service and space routes API tests
+- Tenant detail API and TrustOS gap feature tests
+- Context model tests
 - Row-level security tests (PostgreSQL-only, 6 tests)
+- **Real Cognito integration tests** (28 tests, gated by `RUN_COGNITO_TESTS=1`) — live user pool CRUD, JWT verification, invitation flows, full auth round-trip
+- **Mock Cognito service flow tests** (43 tests) — all `cognito_admin_service` functions with mocked boto3
+- **Route-level integration tests** (51 tests) — invitation, space, tenant-user, session, auth, and platform routes
 
 ### Frontend (57 tests across 10 files)
 
@@ -743,8 +755,14 @@ Frontend:
 # Standard unit tests (SQLite)
 cd backend && pytest -q tests
 
+# Real Cognito integration tests (requires .env with valid Cognito config + AWS credentials)
+RUN_COGNITO_TESTS=1 pytest -q tests/test_cognito_integration.py
+
 # PostgreSQL RLS verification
 RUN_POSTGRES_RLS_TESTS=1 DATABASE_URL=postgresql://rls_tester:pw@host:5432/db pytest -q tests/test_row_level_security.py
+
+# Coverage report
+pytest -q tests --cov=app.auth_usermanagement --cov-report=term-missing
 
 # Frontend
 cd frontend && npx vitest run
@@ -927,7 +945,25 @@ Verified against PostgreSQL 17.6 on AWS RDS.
 - CSRF cookie path changed from /auth/token to / (JS must read from any page URL).
 - Frontend role recognition updated for v3.0 names (account_owner, account_admin, account_member) alongside legacy names.
 - Cognito requires ALLOW_USER_PASSWORD_AUTH enabled on app client for custom_ui mode.
-- 381 backend tests passing (SQLite), 382 on PostgreSQL.
+- 475 backend tests passing (SQLite), 476 on PostgreSQL.
+
+### Integration Tests & Coverage — 2026-03-29
+
+- Added `test_cognito_integration.py`: 28 real Cognito integration tests hitting live user pool (gated by `RUN_COGNITO_TESTS=1`).
+  - Tests: user CRUD, disable/enable, auth flows, JWT verification, invitation lifecycle, full auth round-trip via HTTP endpoints.
+- Added `test_cognito_service_flows.py`: 43 mock-based unit tests for all `cognito_admin_service` functions.
+- Added `test_route_integration.py`: 51 route-level integration tests covering invitation, space, tenant-user, session, auth, and platform routes.
+- Coverage: 95% (2962 statements, 155 missed) across `app.auth_usermanagement`.
+- 597 backend tests passing (SQLite), 6 skipped (RLS requires PostgreSQL), 28 skipped without `RUN_COGNITO_TESTS=1`.
+
+### Code Quality & Logging — 2026-03-28
+
+- Fixed all Pydantic v2 deprecations: migrated `class Config:` to `model_config = ConfigDict(...)` / `SettingsConfigDict(...)` across all schemas and config files.
+- Fixed `datetime.utcnow()` deprecation in models and tests (replaced with timezone-aware helper).
+- Added structured JSON logging via `logging_config.py` (auto-configured on module import, uses `python-json-logger`).
+- Rate limiter now supports persistent PostgreSQL storage when `get_db=SessionLocal` is passed to `RateLimitMiddleware`.
+- Added `python-json-logger==2.0.7` to `requirements.txt`.
+- 475 backend tests passing at this point (before integration test additions).
 
 ---
 
@@ -942,7 +978,7 @@ Readiness strengths:
 - Session lifecycle and audit persistence.
 - PostgreSQL RLS verified on real infrastructure.
 - Automated cleanup for all ephemeral data.
-- Comprehensive test coverage (backend + frontend).
+- Comprehensive test coverage — 597 backend tests (95% coverage), 57 frontend tests.
 
 Host-integration responsibilities:
 - Provide host DB runtime ownership (engine, SessionLocal, Base, get_db).
@@ -951,4 +987,4 @@ Host-integration responsibilities:
 - Schedule cleanup service.
 - Configure production infra (CORS, HTTPS cookies, monitoring).
 
-This report reflects code behavior as of 2026-03-23.
+This report reflects code behavior as of 2026-03-29.

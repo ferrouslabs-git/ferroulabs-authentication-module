@@ -1,4 +1,5 @@
 """Unit tests for role guard behavior."""
+import warnings
 from uuid import uuid4
 
 import pytest
@@ -18,20 +19,26 @@ def _ctx(role: str | None, is_platform_admin: bool = False) -> TenantContext:
 
 
 def test_require_admin_allows_owner_and_admin():
-    assert require_admin(_ctx("owner")).role == "owner"
-    assert require_admin(_ctx("admin")).role == "admin"
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)
+        assert require_admin(_ctx("owner")).role == "owner"
+        assert require_admin(_ctx("admin")).role == "admin"
 
 
 def test_require_admin_blocks_member():
-    with pytest.raises(HTTPException) as exc:
-        require_admin(_ctx("member"))
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)
+        with pytest.raises(HTTPException) as exc:
+            require_admin(_ctx("member"))
 
     assert exc.value.status_code == 403
     assert "permission" in str(exc.value.detail).lower() or "role" in str(exc.value.detail).lower()
 
 
 def test_require_admin_allows_platform_admin_regardless_of_role():
-    result = require_admin(_ctx(None, is_platform_admin=True))
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)
+        result = require_admin(_ctx(None, is_platform_admin=True))
     assert result.is_platform_admin is True
 
 

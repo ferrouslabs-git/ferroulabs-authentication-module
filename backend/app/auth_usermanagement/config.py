@@ -7,7 +7,7 @@ Host apps own shared runtime settings (for example DATABASE_URL).
 import os
 from functools import lru_cache
 
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -64,9 +64,7 @@ class Settings(BaseSettings):
             return self.auth_csrf_cookie_name
         return f"{self.auth_namespace}_csrf_token"
 
-    class Config:
-        env_file = ".env"
-        extra = "ignore"
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
 
 @lru_cache()

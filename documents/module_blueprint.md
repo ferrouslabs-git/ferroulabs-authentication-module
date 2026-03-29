@@ -84,9 +84,10 @@ host-app/
 
 ```
 <module_name>/
-├── __init__.py          ← Module docstring only
+├── __init__.py          ← Module docstring + logging setup
 ├── database.py          ← Bridge file (sole absolute import)
 ├── config.py            ← Module-specific pydantic-settings
+├── logging_config.py    ← Optional: JSON structured logging
 ├── api/
 │   ├── __init__.py      ← Router composition
 │   ├── foo_routes.py
@@ -373,7 +374,7 @@ Host apps own shared runtime settings (for example DATABASE_URL).
 import os
 from functools import lru_cache
 
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -383,9 +384,7 @@ class Settings(BaseSettings):
     api_prefix: str = os.getenv("<MODULE>_API_PREFIX", "/<module_name>")
     some_api_key: str = os.getenv("<MODULE>_API_KEY", "")
 
-    class Config:
-        env_file = ".env"
-        extra = "ignore"
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
 
 @lru_cache()

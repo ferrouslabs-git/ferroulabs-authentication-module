@@ -7,7 +7,11 @@
 5. Deactivate membership PATCH alias (route)
 6. Status filter on tenant user list (service + route)
 """
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+
+
+def _utcnow():
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 from types import SimpleNamespace
 from uuid import uuid4
 
@@ -148,7 +152,7 @@ class TestGetInvitationById:
                 target_scope_id=ids["tenant_id"],
                 target_role_name="account_member",
                 created_by=ids["owner_id"],
-                expires_at=datetime.utcnow() + timedelta(days=7),
+                expires_at=_utcnow() + timedelta(days=7),
             )
             db.add(inv)
             db.commit()
@@ -176,7 +180,7 @@ class TestGetInvitationById:
                 target_scope_id=ids["tenant_id"],
                 target_role_name="account_member",
                 created_by=ids["owner_id"],
-                expires_at=datetime.utcnow() + timedelta(days=7),
+                expires_at=_utcnow() + timedelta(days=7),
             )
             db.add(inv)
             db.commit()
@@ -583,7 +587,7 @@ class TestRouteResendByInvitationId:
                 target_scope_id=_UUID(ids["tenant_id"]),
                 target_role_name="account_member",
                 created_by=_UUID(ids["owner_id"]),
-                expires_at=datetime.utcnow() + timedelta(days=7),
+                expires_at=_utcnow() + timedelta(days=7),
             )
             db.add(inv)
             db.commit()

@@ -19,6 +19,7 @@ from app.auth_usermanagement.services.cognito_admin_service import (
     admin_enable_user,
     admin_get_user,
     admin_reset_user_password,
+    create_invited_cognito_user,
 )
 from app.auth_usermanagement.services.user_service import delete_user
 from app.database import Base
@@ -230,3 +231,90 @@ def test_delete_user_not_found(mock_cognito_delete):
     finally:
         session.close()
         Base.metadata.drop_all(engine)
+
+
+# ── create_invited_cognito_user tests ─────────────────────────────────
+
+
+@patch("app.auth_usermanagement.services.cognito_admin_service._get_cognito_client")
+def test_create_invited_cognito_user_success(mock_client_factory):
+    client = MagicMock()
+    mock_client_factory.return_value = client
+    client.admin_create_user.return_value = {
+        "User": {
+            "Attributes": [
+                {"Name": "sub", "Value": "new-sub-123"},
+                {"Name": "email", "Value": "invite@example.com"},
+            ],
+        }
+    }
+
+    result = create_invited_cognito_user("invite@example.com")
+
+    assert result["cognito_sub"] == "new-sub-123"
+    assert result["status"] == "FORCE_CHANGE_PASSWORD"
+    assert "temp_password" in result
+    client.admin_create_user.assert_called_once()
+    call_kwargs = client.admin_create_user.call_args[1]
+    assert call_kwargs["MessageAction"] == "SUPPRESS"
+
+
+@patch("app.auth_usermanagement.services.cognito_admin_service._get_cognito_client")
+def test_create_invited_cognito_user_already_exists_resets_password(mock_client_factory):
+    """When user already exists, it should reset to FORCE_CHANGE_PASSWORD."""
+    from botocore.exceptions import ClientError
+
+    client = MagicMock()
+    mock_client_factory.return_value = client
+    client.admin_create_user.side_effect = ClientError(
+        {"Error": {"Code": "UsernameExistsException", "Message": "User exists"}},
+        "AdminCreateUser",
+    )
+
+    result = create_invited_cognito_user("existing@example.com")
+
+    assert result["status"] == "FORCE_CHANGE_PASSWORD"
+    assert "temp_password" in result
+    client.admin_set_user_password.assert_called_once()
+    call_kwargs = client.admin_set_user_password.call_args[1]
+    assert call_kwargs["Permanent"] is False
+
+
+@patch("app.auth_usermanagement.services.cognito_admin_service._get_cognito_client")
+def test_create_invited_cognito_user_other_client_error(mock_client_factory):
+    """Non-UsernameExistsException errors should return error dict."""
+    from botocore.exceptions import ClientError
+
+    client = MagicMock()
+    mock_client_factory.return_value = client
+    client.admin_create_user.side_effect = ClientError(
+        {"Error": {"Code": "InternalErrorException", "Message": "Service unavailable"}},
+        "AdminCreateUser",
+    )
+
+    result = create_invited_cognito_user("fail@example.com")
+
+    assert "error" in result
+    assert "Service unavailable" in result["error"]
+
+
+@patch("app.auth_usermanagement.services.cognito_admin_service._get_cognito_client")
+def test_create_invited_cognito_user_reset_fails(mock_client_factory):
+    """When user exists but password reset also fails, should return error."""
+    from botocore.exceptions import ClientError
+
+    client = MagicMock()
+    mock_client_factory.return_value = client
+    client.admin_create_user.side_effect = ClientError(
+        {"Error": {"Code": "UsernameExistsException", "Message": "User exists"}},
+        "AdminCreateUser",
+    )
+    client.admin_set_user_password.side_effect = ClientError(
+        {"Error": {"Code": "InternalErrorException", "Message": "Reset failed"}},
+        "AdminSetUserPassword",
+    )
+
+    result = create_invited_cognito_user("fail-reset@example.com")
+
+    assert "error" in result
+    assert "Reset failed" in result["error"]

@@ -1,6 +1,6 @@
 # Documentation Index
 
-Last updated: 2026-03-23
+Last updated: 2026-03-28
 
 ---
 
@@ -9,6 +9,7 @@ Last updated: 2026-03-23
 | Document | Purpose | Audience |
 |----------|---------|----------|
 | [setup_guide.md](setup_guide.md) | Step-by-step integration into a new host project (DB wiring, middleware, env vars, migrations, frontend, Docker, cleanup) | Developers |
+| [host_integration_guide.md](host_integration_guide.md) | Mapping your domain models (users, tenants, organizations) to the module — FK patterns, naming, extension tables | Developers |
 | [agent_reference.md](agent_reference.md) | AI agent / developer technical reference — file tree, data model, permission system, API endpoints, service signatures, invariants | AI agents, developers |
 | [cognito_and_sso_guide.md](cognito_and_sso_guide.md) | AWS Cognito base setup, SSO provider configuration (Google / Azure), federation wiring, multi-tenant SSO planning | Developers, ops |
 | [Custom UI Integration Guide](custom_ui_integration_guide.md) | Building custom login/signup UI instead of Cognito Hosted UI (`AUTH_MODE=custom_ui`) | Developers |
@@ -37,7 +38,7 @@ Key files to read for full context:
 2. `backend/app/auth_usermanagement/auth_config.yaml` — role/permission definitions
 3. `.github/copilot-instructions.md` — integration boundary rules
 
-3. **After making changes:**
+**After making changes:**
    - Update verification reports with completion status
    - Create/update implementation summaries
    - Update this index if adding new docs
@@ -55,7 +56,7 @@ Key files to read for full context:
 ```powershell
 # Backend
 cd backend
-uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
+uvicorn app.main:app --host 127.0.0.1 --port 8001 --reload
 
 # Frontend
 cd frontend
@@ -64,13 +65,22 @@ npm run dev
 
 ### Run Tests
 ```powershell
-# Backend tests
+# Backend tests (597 tests, 95% coverage)
 cd backend
-pytest tests/ -v
+pytest -q tests
 
-# Frontend build (validates compilation)
+# Real Cognito integration tests (requires .env with Cognito config + AWS credentials)
+$env:RUN_COGNITO_TESTS="1"; pytest -q tests/test_cognito_integration.py
+
+# PostgreSQL RLS verification
+$env:RUN_POSTGRES_RLS_TESTS="1"; $env:DATABASE_URL="postgresql://..."; pytest -q tests/test_row_level_security.py
+
+# Coverage report
+pytest -q tests --cov=app.auth_usermanagement --cov-report=term-missing
+
+# Frontend
 cd frontend
-npm run build
+npx vitest run
 ```
 
 ### Access Admin Dashboard

@@ -3,11 +3,15 @@
 Covers: account-scope invite, space-scope invite, invite authority
 validation, accept creates scoped membership, legacy default fallback.
 """
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
+
+
+def _utcnow():
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 from app.auth_usermanagement.models.invitation import Invitation
 from app.auth_usermanagement.models.membership import Membership
@@ -66,7 +70,7 @@ def _make_invitation(**overrides):
         tenant_id=uuid4(),
         email="user@example.com",
         token="tok",
-        expires_at=datetime.utcnow() + timedelta(days=7),
+        expires_at=_utcnow() + timedelta(days=7),
         created_by=uuid4(),
         target_scope_type="account",
         target_scope_id=uuid4(),

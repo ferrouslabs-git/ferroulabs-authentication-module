@@ -5,7 +5,11 @@ columns (tenant_id, role on membership; role on invitation) have been removed.
 """
 import pytest
 from uuid import uuid4
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+
+
+def _utcnow():
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 from app.auth_usermanagement.models.membership import Membership
 from app.auth_usermanagement.models.invitation import Invitation
@@ -78,7 +82,7 @@ def test_create_invitation_with_scope_columns(db_session):
         email="new@test.com",
         token=f"tok-{uuid4().hex}",
         token_hash="abc123",
-        expires_at=datetime.utcnow() + timedelta(days=7),
+        expires_at=_utcnow() + timedelta(days=7),
         created_by=user.id,
         target_scope_type="account",
         target_scope_id=tenant.id,

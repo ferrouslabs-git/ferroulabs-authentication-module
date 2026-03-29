@@ -6,7 +6,7 @@ Auth-module settings remain available via compatibility exports.
 from functools import lru_cache
 import os
 
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from app.auth_usermanagement.config import Settings, get_settings
 
@@ -28,9 +28,7 @@ class HostSettings(BaseSettings):
             if origin.strip()
         ]
 
-    class Config:
-        env_file = ".env"
-        extra = "ignore"
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
 
 @lru_cache()

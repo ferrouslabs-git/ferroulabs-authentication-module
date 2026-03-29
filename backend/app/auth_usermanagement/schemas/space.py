@@ -2,7 +2,7 @@
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class SpaceCreateRequest(BaseModel):
@@ -14,14 +14,13 @@ class SpaceCreateRequest(BaseModel):
 
 
 class SpaceResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: UUID
     name: str
     account_id: UUID | None = None
     status: str
     created_at: datetime
-
-    class Config:
-        from_attributes = True
 
 
 class SpaceSuspendResponse(BaseModel):

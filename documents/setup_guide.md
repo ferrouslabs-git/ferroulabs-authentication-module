@@ -25,6 +25,7 @@ pydantic==2.6.1
 pydantic-settings==2.1.0
 python-dotenv==1.0.1
 python-jose[cryptography]==3.3.0
+python-json-logger==2.0.7
 requests==2.31.0
 boto3==1.34.51
 alembic==1.13.1
@@ -103,7 +104,7 @@ Host owns root-level settings like CORS. Module settings remain in `auth_userman
 ```python
 from functools import lru_cache
 import os
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from app.auth_usermanagement.config import Settings, get_settings
 
 
@@ -117,9 +118,7 @@ class HostSettings(BaseSettings):
     def resolved_cors_allowed_origins(self) -> list[str]:
         return [o.strip() for o in self.cors_allowed_origins.split(",") if o.strip()]
 
-    class Config:
-        env_file = ".env"
-        extra = "ignore"
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
 
 @lru_cache()
@@ -138,6 +137,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_host_settings
+from app.database import SessionLocal
 from app.auth_usermanagement.api import router as auth_router
 from app.auth_usermanagement.config import get_settings
 from app.auth_usermanagement.security.rate_limit_middleware import RateLimitMiddleware
@@ -159,7 +159,7 @@ app.add_middleware(
 
 # Auth middleware stack (order matters — added last executes first)
 app.add_middleware(TenantContextMiddleware, auth_prefix=settings.auth_api_prefix)
-app.add_middleware(RateLimitMiddleware, auth_prefix=settings.auth_api_prefix)
+app.add_middleware(RateLimitMiddleware, auth_prefix=settings.auth_api_prefix, get_db=SessionLocal)
 app.add_middleware(SecurityHeadersMiddleware)
 
 # Mount auth routes
@@ -181,7 +181,7 @@ Response ← SecurityHeaders ← RateLimit ← TenantContext ← Route Handler
 ```
 
 - **SecurityHeadersMiddleware**: Adds CSP, X-Frame-Options, etc. to every response
-- **RateLimitMiddleware**: IP-based rate limiting on sensitive auth endpoints
+- **RateLimitMiddleware**: IP-based rate limiting on sensitive auth endpoints (pass `get_db=SessionLocal` for persistent PostgreSQL storage; omit for in-memory fallback)
 - **TenantContextMiddleware**: Validates X-Tenant-ID or X-Scope-Type/X-Scope-ID headers, stores on `request.state`
 
 ---
@@ -330,6 +330,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from app.database import Base, DATABASE_URL
 from app.auth_usermanagement.models import (
     Tenant, User, Membership, Invitation, Session, RefreshTokenStore,
+    AuditEvent, RoleDefinition, PermissionGrant, Space, RateLimitHit,
 )
 
 config = context.config
@@ -462,6 +463,14 @@ curl -X POST http://localhost:8001/auth/tenants \
   -H "Authorization: Bearer <your-jwt>" \
   -H "Content-Type: application/json" \
   -d '{"name": "My Org"}'
+```
+
+### Cognito Integration Tests
+
+For real Cognito integration verification (requires `.env` with valid Cognito config + AWS credentials):
+
+```bash
+RUN_COGNITO_TESTS=1 pytest -q tests/test_cognito_integration.py
 ```
 
 ### PostgreSQL RLS Tests

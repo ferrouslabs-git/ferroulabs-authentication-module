@@ -1,7 +1,11 @@
 """Unit tests for invitation lifecycle service behavior."""
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from uuid import uuid4
+
+
+def _utcnow():
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 import pytest
 
@@ -59,14 +63,14 @@ def _invitation(email: str = "user@example.com", role_name: str = "account_membe
         tenant_id=uuid4(),
         email=email,
         token="tok",
-        expires_at=datetime.utcnow() + timedelta(days=days),
+        expires_at=_utcnow() + timedelta(days=days),
         created_by=uuid4(),
         target_scope_type="account",
         target_scope_id=uuid4(),
         target_role_name=role_name,
     )
     if accepted:
-        inv.accepted_at = datetime.utcnow()
+        inv.accepted_at = _utcnow()
     return inv
 
 
@@ -114,7 +118,7 @@ def test_create_invitation_expires_previous_pending_for_same_email_and_tenant():
         email="person@example.com",
         target_role_name="account_member",
         token="old",
-        expires_at=datetime.utcnow() + timedelta(days=5),
+        expires_at=_utcnow() + timedelta(days=5),
         created_by=uuid4(),
     )
     original_expiry = pending.expires_at
@@ -128,7 +132,7 @@ def test_create_invitation_expires_previous_pending_for_same_email_and_tenant():
         created_by=uuid4(),
     )[0]  # unpack invitation from tuple
 
-    assert pending.expires_at <= datetime.utcnow()
+    assert pending.expires_at <= _utcnow()
     assert pending.expires_at < original_expiry
     assert invitation.token != pending.token
     assert db.commits == 1
@@ -155,7 +159,7 @@ def test_accept_invitation_rejects_email_mismatch():
 def test_accept_invitation_rejects_revoked_invitation():
     db = _FakeSession()
     invitation = _invitation()
-    invitation.revoked_at = datetime.utcnow()
+    invitation.revoked_at = _utcnow()
     user = SimpleNamespace(id=uuid4(), email="user@example.com")
 
     with pytest.raises(ValueError, match="revoked"):
@@ -177,7 +181,7 @@ def test_accept_invitation_reactivates_existing_membership_without_downgrade():
         tenant_id=uuid4(),
         email="user@example.com",
         token="tok",
-        expires_at=datetime.utcnow() + timedelta(days=1),
+        expires_at=_utcnow() + timedelta(days=1),
         created_by=uuid4(),
         target_scope_type="account",
         target_scope_id=existing.scope_id,
@@ -237,7 +241,7 @@ def test_revoke_invitation_rejects_accepted_invitation():
 def test_revoke_already_revoked_invitation_raises():
     db = _FakeSession()
     invitation = _invitation()
-    invitation.revoked_at = datetime.utcnow()
+    invitation.revoked_at = _utcnow()
 
     with pytest.raises(ValueError, match="already revoked"):
         revoke_invitation(db, invitation)
@@ -268,7 +272,7 @@ def test_accept_invitation_upgrades_when_invited_role_has_more_permissions():
         tenant_id=uuid4(),
         email="user@example.com",
         token="tok",
-        expires_at=datetime.utcnow() + timedelta(days=1),
+        expires_at=_utcnow() + timedelta(days=1),
         created_by=uuid4(),
         target_scope_type="account",
         target_scope_id=existing.scope_id,
@@ -374,7 +378,7 @@ def test_resend_invitation_rejects_accepted_invitation():
 def test_resend_invitation_rejects_revoked_invitation():
     db = _FakeSession()
     invitation = _invitation()
-    invitation.revoked_at = datetime.utcnow()
+    invitation.revoked_at = _utcnow()
 
     with pytest.raises(ValueError, match="cannot be resent"):
         resend_invitation(db, invitation)

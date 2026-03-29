@@ -152,15 +152,13 @@ def test_token_refresh_returns_access_token(monkeypatch):
         return_value=cognito_response,
     ), patch("app.auth_usermanagement.api.get_settings", return_value=_FakeSettings()):
         with TestClient(app) as client:
+            client.cookies.set(_FakeSettings.resolved_auth_cookie_name, "opaque-cookie-key")
+            client.cookies.set(_FakeSettings.resolved_auth_csrf_cookie_name, "valid-csrf-token")
             resp = client.post(
                 "/auth/token/refresh",
                 headers={
                     "X-Requested-With": "XMLHttpRequest",
                     "X-CSRF-Token": "valid-csrf-token",
-                },
-                cookies={
-                    _FakeSettings.resolved_auth_cookie_name: "opaque-cookie-key",
-                    _FakeSettings.resolved_auth_csrf_cookie_name: "valid-csrf-token",
                 },
             )
 
@@ -173,22 +171,22 @@ def test_token_refresh_returns_access_token(monkeypatch):
 def test_token_refresh_rejects_missing_cookie():
     with patch("app.auth_usermanagement.api.get_settings", return_value=_FakeSettings()):
         with TestClient(app) as client:
+            client.cookies.set(_FakeSettings.resolved_auth_csrf_cookie_name, "valid-csrf")
             resp = client.post(
                 "/auth/token/refresh",
                 headers={
                     "X-Requested-With": "XMLHttpRequest",
                     "X-CSRF-Token": "valid-csrf",
                 },
-                cookies={_FakeSettings.resolved_auth_csrf_cookie_name: "valid-csrf"},
             )
     assert resp.status_code == 401
 
 
 def test_token_refresh_rejects_missing_csrf_header():
     with TestClient(app) as client:
+        client.cookies.set(_FakeSettings.resolved_auth_cookie_name, "valid-refresh-token")
         resp = client.post(
             "/auth/token/refresh",
-            cookies={_FakeSettings.resolved_auth_cookie_name: "valid-refresh-token"},
         )
     assert resp.status_code == 403
 
@@ -197,10 +195,10 @@ def test_token_refresh_rejects_missing_csrf_token():
     """X-Requested-With present but no CSRF header or cookie → 403."""
     with patch("app.auth_usermanagement.api.get_settings", return_value=_FakeSettings()):
         with TestClient(app) as client:
+            client.cookies.set(_FakeSettings.resolved_auth_cookie_name, "valid-refresh-token")
             resp = client.post(
                 "/auth/token/refresh",
                 headers={"X-Requested-With": "XMLHttpRequest"},
-                cookies={_FakeSettings.resolved_auth_cookie_name: "valid-refresh-token"},
             )
     assert resp.status_code == 403
     assert "CSRF" in resp.json()["detail"]
@@ -210,15 +208,13 @@ def test_token_refresh_rejects_mismatched_csrf_token():
     """CSRF header value does not match the CSRF cookie → 403."""
     with patch("app.auth_usermanagement.api.get_settings", return_value=_FakeSettings()):
         with TestClient(app) as client:
+            client.cookies.set(_FakeSettings.resolved_auth_cookie_name, "valid-refresh-token")
+            client.cookies.set(_FakeSettings.resolved_auth_csrf_cookie_name, "correct-token")
             resp = client.post(
                 "/auth/token/refresh",
                 headers={
                     "X-Requested-With": "XMLHttpRequest",
                     "X-CSRF-Token": "wrong-token",
-                },
-                cookies={
-                    _FakeSettings.resolved_auth_cookie_name: "valid-refresh-token",
-                    _FakeSettings.resolved_auth_csrf_cookie_name: "correct-token",
                 },
             )
     assert resp.status_code == 403
@@ -234,15 +230,13 @@ def test_token_refresh_rejects_cognito_error(monkeypatch):
         side_effect=ValueError("Refresh token expired"),
     ), patch("app.auth_usermanagement.api.get_settings", return_value=_FakeSettings()):
         with TestClient(app) as client:
+            client.cookies.set(_FakeSettings.resolved_auth_cookie_name, "opaque-cookie-key")
+            client.cookies.set(_FakeSettings.resolved_auth_csrf_cookie_name, "valid-csrf")
             resp = client.post(
                 "/auth/token/refresh",
                 headers={
                     "X-Requested-With": "XMLHttpRequest",
                     "X-CSRF-Token": "valid-csrf",
-                },
-                cookies={
-                    _FakeSettings.resolved_auth_cookie_name: "opaque-cookie-key",
-                    _FakeSettings.resolved_auth_csrf_cookie_name: "valid-csrf",
                 },
             )
     assert resp.status_code == 401
@@ -267,15 +261,13 @@ def test_token_refresh_rotates_cookie_when_cognito_returns_new_refresh_token():
         return_value=cognito_response,
     ), patch("app.auth_usermanagement.api.get_settings", return_value=_FakeSettings()):
         with TestClient(app) as client:
+            client.cookies.set(_FakeSettings.resolved_auth_cookie_name, "old-opaque-key")
+            client.cookies.set(_FakeSettings.resolved_auth_csrf_cookie_name, "valid-csrf")
             resp = client.post(
                 "/auth/token/refresh",
                 headers={
                     "X-Requested-With": "XMLHttpRequest",
                     "X-CSRF-Token": "valid-csrf",
-                },
-                cookies={
-                    _FakeSettings.resolved_auth_cookie_name: "old-opaque-key",
-                    _FakeSettings.resolved_auth_csrf_cookie_name: "valid-csrf",
                 },
             )
 
@@ -339,18 +331,16 @@ def test_token_refresh_is_rate_limited():
                 "X-Requested-With": "XMLHttpRequest",
                 "X-CSRF-Token": "valid-csrf",
             }
-            cookies = {
-                _FakeSettings.resolved_auth_cookie_name: "some-token",
-                _FakeSettings.resolved_auth_csrf_cookie_name: "valid-csrf",
-            }
+            client.cookies.set(_FakeSettings.resolved_auth_cookie_name, "some-token")
+            client.cookies.set(_FakeSettings.resolved_auth_csrf_cookie_name, "valid-csrf")
 
-            resp1 = client.post("/auth/token/refresh", headers=headers, cookies=cookies)
+            resp1 = client.post("/auth/token/refresh", headers=headers)
             assert resp1.status_code == 200
 
-            resp2 = client.post("/auth/token/refresh", headers=headers, cookies=cookies)
+            resp2 = client.post("/auth/token/refresh", headers=headers)
             assert resp2.status_code == 200
 
-            resp3 = client.post("/auth/token/refresh", headers=headers, cookies=cookies)
+            resp3 = client.post("/auth/token/refresh", headers=headers)
             assert resp3.status_code == 429
             assert resp3.json()["detail"] == "Rate limit exceeded. Please retry later."
             assert "Retry-After" in resp3.headers

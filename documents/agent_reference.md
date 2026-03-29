@@ -14,7 +14,7 @@
 - **ORM**: SQLAlchemy 2.0
 - **Permission Model**: YAML-driven roles → resolved permission strings
 - **Frontend**: React (hooks + context), Vite bundler
-- **Tests**: 381 backend (SQLite) + 57 frontend
+- **Tests**: 597 backend (SQLite, 95% coverage) + 57 frontend
 
 ---
 
@@ -31,6 +31,7 @@ backend/
 │       ├── auth_config.yaml             # Role + permission definitions (v3.0)
 │       ├── config.py                    # Module settings (Cognito, SES, prefixes)
 │       ├── database.py                  # Bridge: re-exports host DB objects via relative imports
+│       ├── logging_config.py            # JSON structured logging (auto-configured on import)
 │       ├── api/
 │       │   ├── __init__.py              # Router composition (includes all sub-routers)
 │       │   ├── auth_routes.py           # /sync, /debug-token, /me
@@ -98,40 +99,52 @@ backend/
 ├── tests/
 │   ├── conftest.py                      # SQLite in-memory fixtures
 │   ├── test_audit_service.py
+│   ├── test_auth_routes_api.py
 │   ├── test_cleanup_service.py          # 9 tests for expired data purging
+│   ├── test_cognito_admin_ops.py
+│   ├── test_cognito_integration.py     # 28 real Cognito tests (RUN_COGNITO_TESTS=1)
+│   ├── test_cognito_service_flows.py    # 43 mock-based Cognito service tests
 │   ├── test_config_loader.py
+│   ├── test_config_routes_api.py
 │   ├── test_context_models.py
 │   ├── test_cookie_token_endpoints.py
 │   ├── test_cookie_token_service.py
+│   ├── test_cross_feature_integration.py
 │   ├── test_custom_ui_auth.py           # Custom UI auth endpoints + Cognito admin service tests
 │   ├── test_db_ownership_boundary.py
 │   ├── test_db_runtime_guardrails.py
+│   ├── test_e2e_auth_lifecycle.py
+│   ├── test_email_service.py
 │   ├── test_guards.py
 │   ├── test_invitation_service.py
-│   ├── test_jwks_cache_ttl.py           # JWKS TTL cache and key rotation tests
+│   ├── test_jwt_verifier.py
 │   ├── test_main_auth_prefix.py
+│   ├── test_medium_priority_api.py
 │   ├── test_membership_backfill.py
 │   ├── test_permission_guards.py
 │   ├── test_platform_tenant_api.py
+│   ├── test_platform_user_delete_api.py
 │   ├── test_rate_limit_middleware.py
 │   ├── test_rate_limiter_service.py
 │   ├── test_refresh_token_store_service.py
+│   ├── test_route_integration.py         # 51 route-level integration tests
 │   ├── test_row_level_security.py       # PostgreSQL-only (RUN_POSTGRES_RLS_TESTS=1)
 │   ├── test_scope_context.py
 │   ├── test_scoped_invitations.py
+│   ├── test_security_headers_middleware.py
 │   ├── test_session_api.py
 │   ├── test_session_service.py
+│   ├── test_space_routes_api.py
 │   ├── test_space_service.py
+│   ├── test_tenant_detail_api.py
 │   ├── test_tenant_isolation_api.py
 │   ├── test_tenant_middleware.py
 │   ├── test_tenant_service.py
-│   ├── test_tenant_detail_api.py
+│   ├── test_trustos_gap_features.py
 │   ├── test_user_management_service.py
 │   ├── test_user_service.py
 │   ├── test_user_suspension_api.py
-│   ├── test_user_suspension.py
-│   ├── test_platform_user_delete_api.py
-│   └── test_cognito_admin_ops.py
+│   └── test_user_suspension.py
 frontend/
 ├── src/
 │   ├── App.jsx
@@ -421,6 +434,7 @@ verify_user_tenant_access(user_id: UUID, tenant_id: UUID, db: Session) -> bool
 suspend_tenant(tenant_id: UUID, db: Session) -> Tenant
 unsuspend_tenant(tenant_id: UUID, db: Session) -> Tenant
 update_tenant(tenant_id: UUID, db: Session, *, name: str | None = None, plan: str | None = None) -> Tenant
+delete_tenant(tenant_id: UUID, db: Session) -> dict
 ```
 
 ### invitation_service.py
@@ -455,6 +469,8 @@ list_user_spaces(db, user_id) -> list[Space]
 list_account_spaces(db, account_id) -> list[Space]
 suspend_space(db, space_id) -> Space
 unsuspend_space(db, space_id) -> Space
+get_space_by_id(db, space_id) -> Space | None
+update_space(db, space_id, *, name: str | None = None) -> Space
 ```
 
 ### user_management_service.py
@@ -483,12 +499,13 @@ call_cognito_refresh(refresh_token, cognito_domain, client_id) -> dict
 
 ```python
 # Custom UI auth flows (AUTH_MODE=custom_ui)
+create_invited_cognito_user(email: str) -> dict  # Pre-creates Cognito user with FORCE_CHANGE_PASSWORD
 initiate_auth(email: str, password: str) -> dict
-sign_up(email: str, password: str) -> dict
-confirm_sign_up(email: str, code: str) -> dict
-set_user_password(email: str, password: str) -> dict
+respond_to_new_password_challenge(email: str, new_password: str, session: str) -> dict
+sign_up_user(email: str, password: str) -> dict
+confirm_sign_up(email: str, confirmation_code: str) -> dict
 resend_confirmation_code(email: str) -> dict
-initiate_forgot_password(email: str) -> dict
+forgot_password(email: str) -> dict
 confirm_forgot_password(email: str, code: str, new_password: str) -> dict
 
 # Admin operations (platform admin only)
@@ -669,7 +686,7 @@ All prefixed with `AUTH_API_PREFIX` (default: `/auth`).
 | `POST` | `/tenants/{id}/invitations/bulk` | Bulk create up to 50 invitations (member+ or platform admin) |
 | `GET` | `/me/memberships` | List all memberships for authenticated user |
 | `POST` | `/invites/accept` | Accept invitation by token |
-| `GET` | `/invites/{token}/preview` | Preview invitation (no auth) |
+| `GET` | `/invites/{token}` | Preview invitation (no auth) |
 | `POST` | `/token/refresh` | Refresh access token via cookie |
 | `POST` | `/cookie/store-refresh` | Store refresh token as httpOnly cookie |
 | `GET` | `/config/roles` | List configured roles |
@@ -699,7 +716,7 @@ All prefixed with `AUTH_API_PREFIX` (default: `/auth`).
 | `POST` | `/invite` | `members:invite` | Send invitation |
 | `POST` | `/tenants/{id}/invites/{token}/resend` | `members:invite` | Resend invitation by token (fresh token + email) |
 | `POST` | `/tenants/{id}/invitations/{invitation_id}/resend` | `members:invite` | Resend invitation by ID (fresh token + email) |
-| `DELETE` | `/invites/{token}` | `members:invite` | Revoke invitation |
+| `DELETE` | `/tenants/{id}/invites/{token}` | `members:invite` | Revoke invitation |
 | `GET` | `/sessions` | — | List user sessions |
 | `DELETE` | `/sessions/{id}` | — | Revoke session |
 | `POST` | `/spaces` | `spaces:create` | Create space |

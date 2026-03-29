@@ -94,6 +94,16 @@ curl.exe -i -H "Authorization: Bearer $($tokenResponse.id_token)" http://localho
 
 Expected: HTTP 200 with `status: valid`.
 
+**Automated integration tests:**
+
+The project includes 28 real Cognito integration tests that verify user CRUD, auth flows, JWT verification, and invitation lifecycle against the live user pool. Run them with:
+
+```bash
+RUN_COGNITO_TESTS=1 pytest -q tests/test_cognito_integration.py
+```
+
+Requires valid Cognito config in `.env` and AWS credentials.
+
 > **Custom UI alternative:** If you don't want to use the Cognito Hosted UI, set `AUTH_MODE=custom_ui` in your backend `.env` and `VITE_AUTH_MODE=custom_ui` in your frontend `.env`. This enables app-owned login, signup, and forgot-password forms that proxy Cognito API calls through your backend. See the [Custom UI Integration Guide](custom_ui_integration_guide.md) for full setup details.
 
 **Using the frontend:**

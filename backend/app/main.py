@@ -5,6 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_host_settings
+from app.database import SessionLocal
 from app.auth_usermanagement.api import router as auth_router
 from app.auth_usermanagement.config import get_settings
 from app.auth_usermanagement.security.rate_limit_middleware import RateLimitMiddleware
@@ -26,7 +27,7 @@ app.add_middleware(
 
 # Middleware stack: added order means execution order is reversed.
 app.add_middleware(TenantContextMiddleware, auth_prefix=settings.auth_api_prefix)
-app.add_middleware(RateLimitMiddleware, auth_prefix=settings.auth_api_prefix)
+app.add_middleware(RateLimitMiddleware, auth_prefix=settings.auth_api_prefix, get_db=SessionLocal)
 app.add_middleware(SecurityHeadersMiddleware)
 
 # Mount auth routes at the configured auth prefix.

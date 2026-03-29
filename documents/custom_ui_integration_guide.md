@@ -49,7 +49,6 @@ AUTH_MODE=custom_ui
 COGNITO_REGION=eu-west-1
 COGNITO_USER_POOL_ID=eu-west-1_XXXXXXXXX
 COGNITO_CLIENT_ID=your_client_id
-COGNITO_CLIENT_SECRET=your_client_secret   # if app client has a secret
 FRONTEND_URL=http://localhost:5173
 ```
 

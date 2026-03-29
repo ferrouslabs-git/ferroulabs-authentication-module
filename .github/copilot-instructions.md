@@ -42,6 +42,7 @@
 11. Test command rule:
 - Standard verification must include:
 - `pytest -q tests`
+- `RUN_COGNITO_TESTS=1` for real Cognito integration tests (when touching auth/Cognito code).
 - `RUN_POSTGRES_RLS_TESTS=1` with PostgreSQL `DATABASE_URL` for tenant isolation checks.
 
 12. No validation bypass rule:
