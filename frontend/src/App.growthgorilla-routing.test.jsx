@@ -86,24 +86,37 @@ describe('GrowthGorilla POC Routes', () => {
   })
 
   describe('Home Route', () => {
-    it('redirects / to /splash/S1', () => {
+    it('shows flow chooser at /', () => {
       renderApp('/')
-      expect(screen.getByText(/splash/i)).toBeInTheDocument()
+      expect(screen.getByText(/choose your route/i)).toBeInTheDocument()
+      expect(screen.getAllByRole('link', { name: /^normal route$/i }).length).toBeGreaterThan(0)
+      expect(screen.getAllByRole('link', { name: /^splash route$/i }).length).toBeGreaterThan(0)
     })
   })
 
   describe('Splash Route', () => {
     it('displays splash page for valid splash ID (S1)', () => {
       renderApp('/splash/S1')
-      expect(screen.getByText(/splash s1/i)).toBeInTheDocument()
+      expect(screen.getByRole('heading', { name: /accelerate your growth/i })).toBeInTheDocument()
       expect(screen.getByText(/module.*a/i)).toBeInTheDocument()
     })
 
     it('displays splash page for all splash IDs (S1-S8)', () => {
-      const splashIds = ['S1', 'S2', 'S3', 'S4', 'S5', 'S6', 'S7', 'S8']
-      splashIds.forEach((id) => {
+      const splashIdsToModuleText = {
+        S1: /module.*a/i,
+        S2: /module.*a/i,
+        S3: /module.*b/i,
+        S4: /module.*b/i,
+        S5: /module.*c/i,
+        S6: /module.*c/i,
+        S7: /module.*d/i,
+        S8: /module.*d/i,
+      }
+
+      Object.entries(splashIdsToModuleText).forEach(([id, moduleRegex]) => {
         const { unmount } = renderApp(`/splash/${id}`)
-        expect(screen.getByText(new RegExp(`splash ${id}`, 'i'))).toBeInTheDocument()
+        expect(screen.getByText(/spin the wheel to unlock an exclusive offer/i)).toBeInTheDocument()
+        expect(screen.getByText(moduleRegex)).toBeInTheDocument()
         unmount()
       })
     })
@@ -144,10 +157,10 @@ describe('GrowthGorilla POC Routes', () => {
       expect(screen.getByText(/module.*d/i)).toBeInTheDocument()
     })
 
-    it('contains Continue to Wheel and Skip to Signup buttons', () => {
+    it('contains links to wheel and signup', () => {
       renderApp('/splash/S1')
-      expect(screen.getByRole('button', { name: /wheel/i })).toBeInTheDocument()
-      expect(screen.getByRole('button', { name: /signup/i })).toBeInTheDocument()
+      expect(screen.getByRole('link', { name: /spin the wheel/i })).toBeInTheDocument()
+      expect(screen.getByRole('link', { name: /skip to sign up/i })).toBeInTheDocument()
     })
   })
 
@@ -159,16 +172,14 @@ describe('GrowthGorilla POC Routes', () => {
 
     it('shows offer options (1 month free, $20 off, 20% off)', () => {
       renderApp('/wheel')
-      const pageText = screen.getByText(/month.*free|dollar.*off|percent.*off/i, {
-        selector: 'div',
-      })
-      expect(pageText).toBeInTheDocument()
+      expect(screen.getAllByText(/1 month free/i).length).toBeGreaterThan(0)
+      expect(screen.getAllByText(/\$20\s*off/i).length).toBeGreaterThan(0)
+      expect(screen.getAllByText(/20%\s*off/i).length).toBeGreaterThan(0)
     })
 
     it('contains navigation to signup only', () => {
       renderApp('/wheel')
-      expect(screen.getByRole('button', { name: /signup/i })).toBeInTheDocument()
-      expect(screen.getByRole('link', { name: /sign up/i })).toBeInTheDocument()
+      expect(screen.getByRole('link', { name: /go to sign up|sign up/i })).toBeInTheDocument()
     })
   })
 
@@ -181,7 +192,7 @@ describe('GrowthGorilla POC Routes', () => {
     it('redirects authenticated users to purchase', () => {
       authState.isAuthenticated = true
       renderApp('/signup')
-      expect(screen.getByText(/payment|purchase/i)).toBeInTheDocument()
+      expect(screen.getByRole('heading', { name: /complete your purchase/i })).toBeInTheDocument()
     })
 
     it('shows funnel banner when context exists', async () => {
@@ -202,9 +213,9 @@ describe('GrowthGorilla POC Routes', () => {
   })
 
   describe('Login Route', () => {
-    it('redirects /login to signup', () => {
+    it('renders login form at /login', () => {
       renderApp('/login')
-      expect(screen.getByTestId('signup-form')).toBeInTheDocument()
+      expect(screen.getByTestId('login-form')).toBeInTheDocument()
     })
   })
 
@@ -218,7 +229,7 @@ describe('GrowthGorilla POC Routes', () => {
     it('redirects authenticated users to purchase', () => {
       authState.isAuthenticated = true
       renderApp('/callback')
-      expect(screen.getByText(/payment|purchase/i)).toBeInTheDocument()
+      expect(screen.getByRole('heading', { name: /complete your purchase/i })).toBeInTheDocument()
     })
   })
 
@@ -232,15 +243,15 @@ describe('GrowthGorilla POC Routes', () => {
     it('allows unauthenticated users to view onboarding page in mock flow', () => {
       authState.isAuthenticated = false
       renderApp('/onboarding')
-      expect(screen.getByText(/onboarding|welcome aboard/i)).toBeInTheDocument()
+      expect(screen.getByText(/^welcome aboard$/i)).toBeInTheDocument()
     })
 
-    it('contains buttons to finish onboarding, restart funnel, and sign out', () => {
+    it('contains buttons to finish onboarding, explore offers, and sign out', () => {
       authState.isAuthenticated = true
       renderApp('/onboarding')
       expect(screen.getByRole('button', { name: /finish|continue/i })).toBeInTheDocument()
-      expect(screen.getByRole('button', { name: /restart/i })).toBeInTheDocument()
-      expect(screen.getByRole('button', { name: /sign out/i })).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: /explore other offers/i })).toBeInTheDocument()
+      expect(screen.getAllByRole('button', { name: /sign out/i }).length).toBeGreaterThan(0)
     })
   })
 
@@ -248,21 +259,21 @@ describe('GrowthGorilla POC Routes', () => {
     it('redirects /dashboard to onboarding', () => {
       authState.isAuthenticated = true
       renderApp('/dashboard')
-      expect(screen.getByText(/onboarding|welcome aboard/i)).toBeInTheDocument()
+      expect(screen.getByText(/^welcome aboard$/i)).toBeInTheDocument()
     })
 
     it('redirects /dashboard to onboarding for unauthenticated users too', () => {
       authState.isAuthenticated = false
       renderApp('/dashboard')
-      expect(screen.getByText(/onboarding|welcome aboard/i)).toBeInTheDocument()
+      expect(screen.getByText(/^welcome aboard$/i)).toBeInTheDocument()
     })
   })
 
   describe('Navigation', () => {
     it('header contains navigation links', () => {
       renderApp('/')
-      expect(screen.getByRole('link', { name: /splash|home/i })).toBeInTheDocument()
-      expect(screen.getByRole('link', { name: /wheel/i })).toBeInTheDocument()
+      expect(screen.getByRole('link', { name: /^home$/i })).toBeInTheDocument()
+      expect(screen.getByRole('link', { name: /^wheel$/i })).toBeInTheDocument()
     })
 
     it('unauthenticated header shows signup but no login link', () => {
@@ -302,8 +313,7 @@ describe('GrowthGorilla POC Routes', () => {
     it('does not display banner when no context exists', () => {
       authState.isAuthenticated = true
       renderApp('/onboarding')
-      const banners = document.querySelectorAll('[style*="background"]')
-      expect(banners.length).toBeLessThan(2) // Only header background
+      expect(screen.queryByText(/journey context:/i)).not.toBeInTheDocument()
     })
   })
 
