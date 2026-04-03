@@ -18,13 +18,13 @@ from pydantic import BaseModel, EmailStr, Field
 
 from ..config import get_settings
 from ..services.cognito_admin_service import (
-    confirm_forgot_password,
-    confirm_sign_up,
-    forgot_password,
-    initiate_auth,
-    resend_confirmation_code,
-    respond_to_new_password_challenge,
-    sign_up_user,
+    confirm_forgot_password_async,
+    confirm_sign_up_async,
+    forgot_password_async,
+    initiate_auth_async,
+    resend_confirmation_code_async,
+    respond_to_new_password_challenge_async,
+    sign_up_user_async,
 )
 
 router = APIRouter()
@@ -101,7 +101,7 @@ async def custom_login(body: LoginRequest):
     set a new password (invitation flow).
     """
     _require_custom_ui()
-    result = initiate_auth(body.email, body.password)
+    result = await initiate_auth_async(body.email, body.password)
 
     if "error" in result:
         raise HTTPException(
@@ -119,7 +119,7 @@ async def custom_signup(body: SignupRequest):
     User may need to confirm their email via a code sent by Cognito.
     """
     _require_custom_ui()
-    result = sign_up_user(body.email, body.password)
+    result = await sign_up_user_async(body.email, body.password)
 
     if "error" in result:
         raise HTTPException(
@@ -138,7 +138,7 @@ async def custom_signup(body: SignupRequest):
 async def custom_confirm(body: ConfirmRequest):
     """Confirm email address after self-service signup."""
     _require_custom_ui()
-    result = confirm_sign_up(body.email, body.code)
+    result = await confirm_sign_up_async(body.email, body.code)
 
     if "error" in result:
         raise HTTPException(
@@ -157,7 +157,7 @@ async def custom_set_password(body: SetPasswordRequest):
     The session token from that response is required.
     """
     _require_custom_ui()
-    result = respond_to_new_password_challenge(
+    result = await respond_to_new_password_challenge_async(
         body.email, body.new_password, body.session,
     )
 
@@ -174,7 +174,7 @@ async def custom_set_password(body: SetPasswordRequest):
 async def custom_resend_code(body: ResendCodeRequest):
     """Resend email confirmation code for unconfirmed users."""
     _require_custom_ui()
-    result = resend_confirmation_code(body.email)
+    result = await resend_confirmation_code_async(body.email)
 
     if "error" in result:
         raise HTTPException(
@@ -189,7 +189,7 @@ async def custom_resend_code(body: ResendCodeRequest):
 async def custom_forgot_password(body: ForgotPasswordRequest):
     """Initiate forgot-password flow — sends a reset code to the user's email."""
     _require_custom_ui()
-    result = forgot_password(body.email)
+    result = await forgot_password_async(body.email)
 
     if "error" in result:
         raise HTTPException(
@@ -204,7 +204,7 @@ async def custom_forgot_password(body: ForgotPasswordRequest):
 async def custom_confirm_forgot_password(body: ConfirmForgotPasswordRequest):
     """Complete forgot-password with reset code + new password."""
     _require_custom_ui()
-    result = confirm_forgot_password(body.email, body.code, body.new_password)
+    result = await confirm_forgot_password_async(body.email, body.code, body.new_password)
 
     if "error" in result:
         raise HTTPException(

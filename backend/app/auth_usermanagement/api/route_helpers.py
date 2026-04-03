@@ -100,8 +100,8 @@ async def create_invitation_response(
     # In custom_ui mode, pre-create the user in Cognito so the frontend
     # can show a "set password" form instead of the Hosted UI signup page.
     if settings.auth_mode == "custom_ui":
-        from ..services.cognito_admin_service import create_invited_cognito_user
-        cognito_result = create_invited_cognito_user(invitation.email)
+        from ..services.cognito_admin_service import create_invited_cognito_user_async
+        cognito_result = await create_invited_cognito_user_async(invitation.email)
         if "error" in cognito_result:
             _logger.warning(
                 "Cognito pre-creation failed; invitation still created",

@@ -98,7 +98,7 @@ async def token_refresh(
         )
 
     try:
-        tokens = api_module.call_cognito_refresh(
+        tokens = await api_module.call_cognito_refresh_async(
             refresh_token=refresh_token,
             cognito_domain=settings.cognito_domain,
             client_id=settings.cognito_client_id,

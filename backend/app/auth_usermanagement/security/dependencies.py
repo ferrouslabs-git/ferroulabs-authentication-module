@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from uuid import UUID
 
 from ..database import get_db
-from ..security.jwt_verifier import verify_token
+from ..security.jwt_verifier import verify_token, verify_token_async
 from ..security.tenant_context import TenantContext
 from ..security.scope_context import ScopeContext
 from ..services.user_service import get_user_by_cognito_sub
@@ -63,7 +63,7 @@ async def get_current_user(
     token = credentials.credentials
     
     # Verify JWT and get payload (raises 401 if invalid)
-    token_payload = verify_token(token)
+    token_payload = await verify_token_async(token)
     
     # Load user from database
     user = get_user_by_cognito_sub(token_payload.sub, db)
@@ -105,7 +105,7 @@ async def get_current_user_optional(
     
     try:
         token = credentials.credentials
-        token_payload = verify_token(token)
+        token_payload = await verify_token_async(token)
         return get_user_by_cognito_sub(token_payload.sub, db)
     except HTTPException:
         return None

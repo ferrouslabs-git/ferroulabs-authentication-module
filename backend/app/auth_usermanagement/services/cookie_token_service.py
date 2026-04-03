@@ -12,9 +12,11 @@ Security properties of the cookie:
 """
 import urllib.parse
 import urllib.request
+import json
 from datetime import datetime, timedelta, UTC
 import secrets
 
+import httpx
 from fastapi import Response
 from sqlalchemy.orm import Session
 
@@ -184,8 +186,6 @@ def call_cognito_refresh(refresh_token: str, cognito_domain: str, client_id: str
         method="POST",
     )
 
-    import json
-
     try:
         with urllib.request.urlopen(req, timeout=10) as resp:  # noqa: S310
             result = json.loads(resp.read().decode("utf-8"))
@@ -199,5 +199,49 @@ def call_cognito_refresh(refresh_token: str, cognito_domain: str, client_id: str
 
     if "error" in result:
         raise ValueError(result.get("error_description") or result.get("error") or "Cognito token refresh failed")
+
+    return result
+
+
+async def call_cognito_refresh_async(
+    refresh_token: str, cognito_domain: str, client_id: str,
+) -> dict:
+    """Async version — exchange refresh token via httpx.AsyncClient.
+
+    Returns the parsed JSON response dict on success.
+    Raises ValueError if Cognito returns an error.
+    """
+    url = f"{cognito_domain}/oauth2/token"
+    data = {
+        "grant_type": "refresh_token",
+        "client_id": client_id,
+        "refresh_token": refresh_token,
+    }
+
+    async with httpx.AsyncClient() as client:
+        try:
+            resp = await client.post(
+                url,
+                data=data,
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+                timeout=10,
+            )
+        except httpx.HTTPError as exc:
+            raise ValueError(f"Cognito token refresh request failed: {exc}") from exc
+
+    if resp.status_code >= 400:
+        try:
+            err = resp.json()
+        except Exception:
+            err = {"error": resp.text}
+        raise ValueError(
+            err.get("error_description") or err.get("error") or "Cognito token refresh failed"
+        )
+
+    result = resp.json()
+    if "error" in result:
+        raise ValueError(
+            result.get("error_description") or result.get("error") or "Cognito token refresh failed"
+        )
 
     return result

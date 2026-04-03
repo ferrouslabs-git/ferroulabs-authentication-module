@@ -1,7 +1,7 @@
 """API tests for platform-admin user deletion and Cognito admin endpoints."""
 
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
 import pytest
@@ -81,8 +81,9 @@ def _client(monkeypatch, SessionLocal, user_sub):
             db.close()
 
     monkeypatch.setattr(
-        security_dependencies, "verify_token",
-        lambda _token: SimpleNamespace(sub=user_sub),
+        security_dependencies,
+        "verify_token_async",
+        AsyncMock(return_value=SimpleNamespace(sub=user_sub)),
     )
     app.dependency_overrides[get_db] = _override_get_db
     return TestClient(app, raise_server_exceptions=True)
@@ -231,7 +232,7 @@ def test_delete_requires_platform_admin(monkeypatch):
 # ── Cognito admin endpoints ─────────────────────────────────────
 
 
-@patch("app.auth_usermanagement.api.platform_user_routes.admin_disable_user")
+@patch("app.auth_usermanagement.api.platform_user_routes.admin_disable_user_async")
 def test_cognito_disable_user(mock_disable, monkeypatch):
     engine, SessionLocal = _make_db()
     ids = _seed(SessionLocal)
@@ -251,7 +252,7 @@ def test_cognito_disable_user(mock_disable, monkeypatch):
         Base.metadata.drop_all(engine)
 
 
-@patch("app.auth_usermanagement.api.platform_user_routes.admin_enable_user")
+@patch("app.auth_usermanagement.api.platform_user_routes.admin_enable_user_async")
 def test_cognito_enable_user(mock_enable, monkeypatch):
     engine, SessionLocal = _make_db()
     ids = _seed(SessionLocal)
@@ -271,7 +272,7 @@ def test_cognito_enable_user(mock_enable, monkeypatch):
         Base.metadata.drop_all(engine)
 
 
-@patch("app.auth_usermanagement.api.platform_user_routes.admin_get_user")
+@patch("app.auth_usermanagement.api.platform_user_routes.admin_get_user_async")
 def test_get_cognito_user_status(mock_get, monkeypatch):
     engine, SessionLocal = _make_db()
     ids = _seed(SessionLocal)
@@ -298,7 +299,7 @@ def test_get_cognito_user_status(mock_get, monkeypatch):
         Base.metadata.drop_all(engine)
 
 
-@patch("app.auth_usermanagement.api.platform_user_routes.admin_reset_user_password")
+@patch("app.auth_usermanagement.api.platform_user_routes.admin_reset_user_password_async")
 def test_reset_cognito_password(mock_reset, monkeypatch):
     engine, SessionLocal = _make_db()
     ids = _seed(SessionLocal)
@@ -318,7 +319,7 @@ def test_reset_cognito_password(mock_reset, monkeypatch):
         Base.metadata.drop_all(engine)
 
 
-@patch("app.auth_usermanagement.api.platform_user_routes.admin_disable_user")
+@patch("app.auth_usermanagement.api.platform_user_routes.admin_disable_user_async")
 def test_cognito_endpoints_require_platform_admin(mock_disable, monkeypatch):
     engine, SessionLocal = _make_db()
     session = SessionLocal()

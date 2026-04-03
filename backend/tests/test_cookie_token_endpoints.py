@@ -1,6 +1,6 @@
 """API tests for cookie/token refresh endpoints."""
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -81,8 +81,8 @@ def _client_with_auth(monkeypatch, SessionLocal, user_sub):
 
     monkeypatch.setattr(
         security_dependencies,
-        "verify_token",
-        lambda _token: SimpleNamespace(sub=user_sub),
+        "verify_token_async",
+        AsyncMock(return_value=SimpleNamespace(sub=user_sub)),
     )
     app.dependency_overrides[get_db] = _override_get_db
     return TestClient(app, raise_server_exceptions=True)
@@ -148,7 +148,7 @@ def test_token_refresh_returns_access_token(monkeypatch):
         "app.auth_usermanagement.api.get_refresh_token",
         return_value="valid-refresh-token",
     ), patch(
-        "app.auth_usermanagement.api.call_cognito_refresh",
+        "app.auth_usermanagement.api.call_cognito_refresh_async",
         return_value=cognito_response,
     ), patch("app.auth_usermanagement.api.get_settings", return_value=_FakeSettings()):
         with TestClient(app) as client:
@@ -226,7 +226,7 @@ def test_token_refresh_rejects_cognito_error(monkeypatch):
         "app.auth_usermanagement.api.get_refresh_token",
         return_value="expired-refresh-token",
     ), patch(
-        "app.auth_usermanagement.api.call_cognito_refresh",
+        "app.auth_usermanagement.api.call_cognito_refresh_async",
         side_effect=ValueError("Refresh token expired"),
     ), patch("app.auth_usermanagement.api.get_settings", return_value=_FakeSettings()):
         with TestClient(app) as client:
@@ -257,7 +257,7 @@ def test_token_refresh_rotates_cookie_when_cognito_returns_new_refresh_token():
         "app.auth_usermanagement.api.rotate_refresh_token",
         return_value="new-opaque-key",
     ), patch(
-        "app.auth_usermanagement.api.call_cognito_refresh",
+        "app.auth_usermanagement.api.call_cognito_refresh_async",
         return_value=cognito_response,
     ), patch("app.auth_usermanagement.api.get_settings", return_value=_FakeSettings()):
         with TestClient(app) as client:
@@ -305,7 +305,7 @@ def test_token_refresh_is_rate_limited():
         "app.auth_usermanagement.api.get_refresh_token",
         return_value="some-refresh-token",
     ), patch(
-        "app.auth_usermanagement.api.call_cognito_refresh",
+        "app.auth_usermanagement.api.call_cognito_refresh_async",
         return_value={"access_token": "tok", "id_token": "id", "expires_in": 3600},
     ), patch(
         "app.auth_usermanagement.api.get_settings",

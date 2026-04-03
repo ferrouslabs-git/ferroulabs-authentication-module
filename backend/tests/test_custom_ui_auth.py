@@ -123,7 +123,7 @@ class TestCustomUILogin:
             "expires_in": 3600,
         }
         with patch("app.auth_usermanagement.api.custom_ui_routes.get_settings", return_value=settings_mock), \
-             patch("app.auth_usermanagement.api.custom_ui_routes.initiate_auth", return_value=cognito_result):
+             patch("app.auth_usermanagement.api.custom_ui_routes.initiate_auth_async", return_value=cognito_result):
             client = TestClient(app)
             resp = client.post("/custom/login", json={"email": "a@b.com", "password": "Test1234!"})
             assert resp.status_code == 200
@@ -140,7 +140,7 @@ class TestCustomUILogin:
             "challenge_parameters": {"USER_ID_FOR_SRP": "user@example.com"},
         }
         with patch("app.auth_usermanagement.api.custom_ui_routes.get_settings", return_value=settings_mock), \
-             patch("app.auth_usermanagement.api.custom_ui_routes.initiate_auth", return_value=cognito_result):
+             patch("app.auth_usermanagement.api.custom_ui_routes.initiate_auth_async", return_value=cognito_result):
             client = TestClient(app)
             resp = client.post("/custom/login", json={"email": "a@b.com", "password": "TempPass1!"})
             assert resp.status_code == 200
@@ -153,7 +153,7 @@ class TestCustomUILogin:
         app, settings_mock = _make_app("custom_ui")
         cognito_result = {"error": "Invalid email or password"}
         with patch("app.auth_usermanagement.api.custom_ui_routes.get_settings", return_value=settings_mock), \
-             patch("app.auth_usermanagement.api.custom_ui_routes.initiate_auth", return_value=cognito_result):
+             patch("app.auth_usermanagement.api.custom_ui_routes.initiate_auth_async", return_value=cognito_result):
             client = TestClient(app)
             resp = client.post("/custom/login", json={"email": "a@b.com", "password": "wrong"})
             assert resp.status_code == 401
@@ -167,7 +167,7 @@ class TestCustomUISignup:
         app, settings_mock = _make_app("custom_ui")
         cognito_result = {"user_sub": "sub-123", "confirmed": False}
         with patch("app.auth_usermanagement.api.custom_ui_routes.get_settings", return_value=settings_mock), \
-             patch("app.auth_usermanagement.api.custom_ui_routes.sign_up_user", return_value=cognito_result):
+             patch("app.auth_usermanagement.api.custom_ui_routes.sign_up_user_async", return_value=cognito_result):
             client = TestClient(app)
             resp = client.post("/custom/signup", json={"email": "new@user.com", "password": "Test1234!"})
             assert resp.status_code == 200
@@ -179,7 +179,7 @@ class TestCustomUISignup:
         app, settings_mock = _make_app("custom_ui")
         cognito_result = {"error": "An account with this email already exists"}
         with patch("app.auth_usermanagement.api.custom_ui_routes.get_settings", return_value=settings_mock), \
-             patch("app.auth_usermanagement.api.custom_ui_routes.sign_up_user", return_value=cognito_result):
+             patch("app.auth_usermanagement.api.custom_ui_routes.sign_up_user_async", return_value=cognito_result):
             client = TestClient(app)
             resp = client.post("/custom/signup", json={"email": "dup@user.com", "password": "Test1234!"})
             assert resp.status_code == 400
@@ -199,7 +199,7 @@ class TestCustomUISetPassword:
             "expires_in": 3600,
         }
         with patch("app.auth_usermanagement.api.custom_ui_routes.get_settings", return_value=settings_mock), \
-             patch("app.auth_usermanagement.api.custom_ui_routes.respond_to_new_password_challenge", return_value=cognito_result):
+             patch("app.auth_usermanagement.api.custom_ui_routes.respond_to_new_password_challenge_async", return_value=cognito_result):
             client = TestClient(app)
             resp = client.post("/custom/set-password", json={
                 "email": "invited@user.com",
@@ -215,7 +215,7 @@ class TestCustomUISetPassword:
         app, settings_mock = _make_app("custom_ui")
         cognito_result = {"error": "Password does not meet requirements: too short"}
         with patch("app.auth_usermanagement.api.custom_ui_routes.get_settings", return_value=settings_mock), \
-             patch("app.auth_usermanagement.api.custom_ui_routes.respond_to_new_password_challenge", return_value=cognito_result):
+             patch("app.auth_usermanagement.api.custom_ui_routes.respond_to_new_password_challenge_async", return_value=cognito_result):
             client = TestClient(app)
             resp = client.post("/custom/set-password", json={
                 "email": "invited@user.com",
@@ -231,7 +231,7 @@ class TestCustomUIConfirm:
     def test_successful_confirmation(self):
         app, settings_mock = _make_app("custom_ui")
         with patch("app.auth_usermanagement.api.custom_ui_routes.get_settings", return_value=settings_mock), \
-             patch("app.auth_usermanagement.api.custom_ui_routes.confirm_sign_up", return_value={"confirmed": True}):
+             patch("app.auth_usermanagement.api.custom_ui_routes.confirm_sign_up_async", return_value={"confirmed": True}):
             client = TestClient(app)
             resp = client.post("/custom/confirm", json={"email": "a@b.com", "code": "123456"})
             assert resp.status_code == 200
@@ -240,7 +240,7 @@ class TestCustomUIConfirm:
     def test_invalid_code(self):
         app, settings_mock = _make_app("custom_ui")
         with patch("app.auth_usermanagement.api.custom_ui_routes.get_settings", return_value=settings_mock), \
-             patch("app.auth_usermanagement.api.custom_ui_routes.confirm_sign_up", return_value={"error": "Invalid confirmation code"}):
+             patch("app.auth_usermanagement.api.custom_ui_routes.confirm_sign_up_async", return_value={"error": "Invalid confirmation code"}):
             client = TestClient(app)
             resp = client.post("/custom/confirm", json={"email": "a@b.com", "code": "000000"})
             assert resp.status_code == 400
@@ -251,7 +251,7 @@ class TestCustomUIResendCode:
     def test_successful_resend(self):
         app, settings_mock = _make_app("custom_ui")
         with patch("app.auth_usermanagement.api.custom_ui_routes.get_settings", return_value=settings_mock), \
-             patch("app.auth_usermanagement.api.custom_ui_routes.resend_confirmation_code", return_value={"sent": True}):
+             patch("app.auth_usermanagement.api.custom_ui_routes.resend_confirmation_code_async", return_value={"sent": True}):
             client = TestClient(app)
             resp = client.post("/custom/resend-code", json={"email": "a@b.com"})
             assert resp.status_code == 200
@@ -275,7 +275,7 @@ class TestInvitationCognitoPreCreation:
             cognito_client_id="test-client",
         )
 
-        mock_cognito = MagicMock(return_value={"cognito_sub": "sub-123", "temp_password": "Tmp!", "status": "FORCE_CHANGE_PASSWORD"})
+        mock_cognito = AsyncMock(return_value={"cognito_sub": "sub-123", "temp_password": "Tmp!", "status": "FORCE_CHANGE_PASSWORD"})
         mock_email = AsyncMock(return_value=SimpleNamespace(sent=True, provider="ses", detail="ok", message_id="m1"))
 
         # Create minimal mocks for the invitation flow
@@ -309,7 +309,7 @@ class TestInvitationCognitoPreCreation:
              patch("app.auth_usermanagement.api.route_helpers.create_invitation", mock_create_inv), \
              patch("app.auth_usermanagement.api.route_helpers.send_invitation_email", mock_email), \
              patch("app.auth_usermanagement.api.route_helpers.log_audit_event"), \
-             patch("app.auth_usermanagement.services.cognito_admin_service.create_invited_cognito_user", mock_cognito):
+             patch("app.auth_usermanagement.services.cognito_admin_service.create_invited_cognito_user_async", mock_cognito):
             result = asyncio.run(
                 create_invitation_response(MagicMock(), tenant_id, invite_data, current_user)
             )
@@ -329,7 +329,7 @@ class TestInvitationCognitoPreCreation:
             cognito_client_id="test-client",
         )
 
-        mock_cognito = MagicMock()
+        mock_cognito = AsyncMock()
         mock_email = AsyncMock(return_value=SimpleNamespace(sent=True, provider="ses", detail="ok", message_id="m1"))
 
         import asyncio
@@ -362,7 +362,7 @@ class TestInvitationCognitoPreCreation:
              patch("app.auth_usermanagement.api.route_helpers.create_invitation", mock_create_inv), \
              patch("app.auth_usermanagement.api.route_helpers.send_invitation_email", mock_email), \
              patch("app.auth_usermanagement.api.route_helpers.log_audit_event"), \
-             patch("app.auth_usermanagement.services.cognito_admin_service.create_invited_cognito_user", mock_cognito):
+             patch("app.auth_usermanagement.services.cognito_admin_service.create_invited_cognito_user_async", mock_cognito):
             result = asyncio.run(
                 create_invitation_response(MagicMock(), tenant_id, invite_data, current_user)
             )
@@ -401,7 +401,7 @@ class TestCustomUIForgotPassword:
     def test_forgot_password_sends_code(self):
         app, settings_mock = _make_app("custom_ui")
         with patch("app.auth_usermanagement.api.custom_ui_routes.get_settings", return_value=settings_mock), \
-             patch("app.auth_usermanagement.api.custom_ui_routes.forgot_password", return_value={"sent": True, "delivery": {}}):
+             patch("app.auth_usermanagement.api.custom_ui_routes.forgot_password_async", return_value={"sent": True, "delivery": {}}):
             client = TestClient(app)
             resp = client.post("/custom/forgot-password", json={"email": "a@b.com"})
             assert resp.status_code == 200
@@ -410,7 +410,7 @@ class TestCustomUIForgotPassword:
     def test_forgot_password_rate_limited(self):
         app, settings_mock = _make_app("custom_ui")
         with patch("app.auth_usermanagement.api.custom_ui_routes.get_settings", return_value=settings_mock), \
-             patch("app.auth_usermanagement.api.custom_ui_routes.forgot_password", return_value={"error": "Too many attempts. Please try again later."}):
+             patch("app.auth_usermanagement.api.custom_ui_routes.forgot_password_async", return_value={"error": "Too many attempts. Please try again later."}):
             client = TestClient(app)
             resp = client.post("/custom/forgot-password", json={"email": "a@b.com"})
             assert resp.status_code == 400
@@ -419,7 +419,7 @@ class TestCustomUIForgotPassword:
     def test_confirm_forgot_password_success(self):
         app, settings_mock = _make_app("custom_ui")
         with patch("app.auth_usermanagement.api.custom_ui_routes.get_settings", return_value=settings_mock), \
-             patch("app.auth_usermanagement.api.custom_ui_routes.confirm_forgot_password", return_value={"confirmed": True}):
+             patch("app.auth_usermanagement.api.custom_ui_routes.confirm_forgot_password_async", return_value={"confirmed": True}):
             client = TestClient(app)
             resp = client.post("/custom/confirm-forgot-password", json={
                 "email": "a@b.com", "code": "123456", "new_password": "NewPass1!"
@@ -430,7 +430,7 @@ class TestCustomUIForgotPassword:
     def test_confirm_forgot_password_invalid_code(self):
         app, settings_mock = _make_app("custom_ui")
         with patch("app.auth_usermanagement.api.custom_ui_routes.get_settings", return_value=settings_mock), \
-             patch("app.auth_usermanagement.api.custom_ui_routes.confirm_forgot_password", return_value={"error": "Invalid reset code"}):
+             patch("app.auth_usermanagement.api.custom_ui_routes.confirm_forgot_password_async", return_value={"error": "Invalid reset code"}):
             client = TestClient(app)
             resp = client.post("/custom/confirm-forgot-password", json={
                 "email": "a@b.com", "code": "000000", "new_password": "NewPass1!"
@@ -441,7 +441,7 @@ class TestCustomUIForgotPassword:
     def test_confirm_forgot_password_weak_password(self):
         app, settings_mock = _make_app("custom_ui")
         with patch("app.auth_usermanagement.api.custom_ui_routes.get_settings", return_value=settings_mock), \
-             patch("app.auth_usermanagement.api.custom_ui_routes.confirm_forgot_password", return_value={"error": "Password does not meet requirements"}):
+             patch("app.auth_usermanagement.api.custom_ui_routes.confirm_forgot_password_async", return_value={"error": "Password does not meet requirements"}):
             client = TestClient(app)
             resp = client.post("/custom/confirm-forgot-password", json={
                 "email": "a@b.com", "code": "123456", "new_password": "ValidLen8!"

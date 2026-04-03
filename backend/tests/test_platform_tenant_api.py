@@ -1,5 +1,6 @@
 """API tests for platform-admin tenant suspension endpoints."""
 
+from unittest.mock import AsyncMock
 from types import SimpleNamespace
 from uuid import uuid4
 
@@ -81,8 +82,8 @@ def _client_with_auth(monkeypatch, SessionLocal, user_sub):
 
     monkeypatch.setattr(
         security_dependencies,
-        "verify_token",
-        lambda _token: SimpleNamespace(sub=user_sub),
+        "verify_token_async",
+        AsyncMock(return_value=SimpleNamespace(sub=user_sub)),
     )
 
     app.dependency_overrides[get_db] = _override_get_db
