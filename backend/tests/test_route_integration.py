@@ -92,8 +92,8 @@ def _client(monkeypatch, SL, user_sub):
             db.close()
 
     monkeypatch.setattr(
-        security_deps, "verify_token",
-        lambda _token: SimpleNamespace(sub=user_sub),
+        security_deps, "verify_token_async",
+        AsyncMock(return_value=SimpleNamespace(sub=user_sub)),
     )
     app.dependency_overrides[get_db] = _override
     return TestClient(app, raise_server_exceptions=False)
@@ -843,8 +843,8 @@ class TestDebugToken:
                 # Also patch verify_token as used in auth_routes directly
                 from app.auth_usermanagement.api import auth_routes
                 monkeypatch.setattr(
-                    auth_routes, "verify_token",
-                    lambda _token: SimpleNamespace(sub="owner-sub", model_dump=lambda: {"sub": "owner-sub"}),
+                    auth_routes, "verify_token_async",
+                    AsyncMock(return_value=SimpleNamespace(sub="owner-sub", model_dump=lambda: {"sub": "owner-sub"})),
                 )
                 r = c.get("/auth/debug-token", headers=_auth())
                 assert r.status_code == 200
@@ -1023,7 +1023,7 @@ class TestPlatformCognitoOperationErrors:
             app.dependency_overrides.clear()
             Base.metadata.drop_all(engine)
 
-    @patch("app.auth_usermanagement.api.platform_user_routes.admin_disable_user")
+    @patch("app.auth_usermanagement.api.platform_user_routes.admin_disable_user_async")
     def test_disable_cognito_error_result_returns_400(self, mock_disable, monkeypatch):
         mock_disable.return_value = {"error": "Cognito error"}
         engine, SL = _make_db()
@@ -1039,7 +1039,7 @@ class TestPlatformCognitoOperationErrors:
             app.dependency_overrides.clear()
             Base.metadata.drop_all(engine)
 
-    @patch("app.auth_usermanagement.api.platform_user_routes.admin_enable_user")
+    @patch("app.auth_usermanagement.api.platform_user_routes.admin_enable_user_async")
     def test_enable_cognito_error_result_returns_400(self, mock_enable, monkeypatch):
         mock_enable.return_value = {"error": "Cognito error"}
         engine, SL = _make_db()
@@ -1055,7 +1055,7 @@ class TestPlatformCognitoOperationErrors:
             app.dependency_overrides.clear()
             Base.metadata.drop_all(engine)
 
-    @patch("app.auth_usermanagement.api.platform_user_routes.admin_get_user")
+    @patch("app.auth_usermanagement.api.platform_user_routes.admin_get_user_async")
     def test_get_cognito_error_result_returns_404(self, mock_get, monkeypatch):
         mock_get.return_value = {"error": "Cognito error"}
         engine, SL = _make_db()
@@ -1071,7 +1071,7 @@ class TestPlatformCognitoOperationErrors:
             app.dependency_overrides.clear()
             Base.metadata.drop_all(engine)
 
-    @patch("app.auth_usermanagement.api.platform_user_routes.admin_reset_user_password")
+    @patch("app.auth_usermanagement.api.platform_user_routes.admin_reset_user_password_async")
     def test_reset_password_error_result_returns_400(self, mock_reset, monkeypatch):
         mock_reset.return_value = {"error": "Cognito error"}
         engine, SL = _make_db()
@@ -1091,7 +1091,7 @@ class TestPlatformCognitoOperationErrors:
 class TestPlatformSuspendValueError:
     """Covers platform_user_routes lines 162-163, 199-200 — suspend/unsuspend ValueError."""
 
-    @patch("app.auth_usermanagement.api.platform_user_routes.suspend_user")
+    @patch("app.auth_usermanagement.api.platform_user_routes.suspend_user_async")
     def test_suspend_value_error_returns_404(self, mock_suspend, monkeypatch):
         mock_suspend.side_effect = ValueError("User not found")
         engine, SL = _make_db()

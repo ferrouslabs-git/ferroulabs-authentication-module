@@ -16,6 +16,7 @@ Last updated: 2026-03-28
 | [submodule_integration_guide.md](submodule_integration_guide.md) | Using this repo as a Git submodule instead of copy-pasting files into host apps | Developers |
 | [version_1_fullreport.md](version_1_fullreport.md) | Complete system report — architecture, security model, data model, test coverage, change history | All |
 | [module_blueprint.md](module_blueprint.md) | Template for building new reusable modules following the same architecture as auth_usermanagement | AI agents, developers |
+| [host_app_module_stack_guide.md](host_app_module_stack_guide.md) | Recommended host app folder structure and ownership model for integrating auth + billing + llm modules together | Developers, architects |
 
 ## Archived
 

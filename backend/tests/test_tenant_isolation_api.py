@@ -1,4 +1,5 @@
 """API-level tenant isolation regression tests."""
+from unittest.mock import AsyncMock
 from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
@@ -66,8 +67,8 @@ def test_tenant_context_endpoint_allows_member_tenant(monkeypatch):
 
     monkeypatch.setattr(
         security_dependencies,
-        "verify_token",
-        lambda _token: SimpleNamespace(sub=seeded["user_sub"]),
+        "verify_token_async",
+        AsyncMock(return_value=SimpleNamespace(sub=seeded["user_sub"])),
     )
     app.dependency_overrides[get_db] = _override_get_db
 
@@ -112,8 +113,8 @@ def test_tenant_context_endpoint_blocks_cross_tenant_access(monkeypatch):
 
     monkeypatch.setattr(
         security_dependencies,
-        "verify_token",
-        lambda _token: SimpleNamespace(sub=seeded["user_sub"]),
+        "verify_token_async",
+        AsyncMock(return_value=SimpleNamespace(sub=seeded["user_sub"])),
     )
     app.dependency_overrides[get_db] = _override_get_db
 

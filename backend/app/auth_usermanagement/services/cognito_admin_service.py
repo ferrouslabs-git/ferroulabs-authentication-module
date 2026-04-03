@@ -10,6 +10,7 @@ No new DB runtime objects — follows host integration contract.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import secrets
 import string
@@ -515,3 +516,64 @@ def admin_reset_user_password(email: str) -> dict:
 
         logger.error("Cognito AdminResetUserPassword failed", extra={"email": email, "error_code": error_code, "error": error_msg})
         return {"error": f"Failed to reset password: {error_msg}"}
+
+
+# ── Async wrappers (offload blocking boto3 to thread) ───────────
+
+
+async def create_invited_cognito_user_async(email: str) -> dict:
+    return await asyncio.to_thread(create_invited_cognito_user, email)
+
+
+async def initiate_auth_async(email: str, password: str) -> dict:
+    return await asyncio.to_thread(initiate_auth, email, password)
+
+
+async def respond_to_new_password_challenge_async(
+    email: str, new_password: str, session: str,
+) -> dict:
+    return await asyncio.to_thread(
+        respond_to_new_password_challenge, email, new_password, session,
+    )
+
+
+async def sign_up_user_async(email: str, password: str) -> dict:
+    return await asyncio.to_thread(sign_up_user, email, password)
+
+
+async def confirm_sign_up_async(email: str, confirmation_code: str) -> dict:
+    return await asyncio.to_thread(confirm_sign_up, email, confirmation_code)
+
+
+async def resend_confirmation_code_async(email: str) -> dict:
+    return await asyncio.to_thread(resend_confirmation_code, email)
+
+
+async def forgot_password_async(email: str) -> dict:
+    return await asyncio.to_thread(forgot_password, email)
+
+
+async def confirm_forgot_password_async(
+    email: str, code: str, new_password: str,
+) -> dict:
+    return await asyncio.to_thread(confirm_forgot_password, email, code, new_password)
+
+
+async def admin_delete_user_async(email: str) -> dict:
+    return await asyncio.to_thread(admin_delete_user, email)
+
+
+async def admin_disable_user_async(email: str) -> dict:
+    return await asyncio.to_thread(admin_disable_user, email)
+
+
+async def admin_enable_user_async(email: str) -> dict:
+    return await asyncio.to_thread(admin_enable_user, email)
+
+
+async def admin_get_user_async(email: str) -> dict:
+    return await asyncio.to_thread(admin_get_user, email)
+
+
+async def admin_reset_user_password_async(email: str) -> dict:
+    return await asyncio.to_thread(admin_reset_user_password, email)

@@ -1,4 +1,5 @@
 """API tests for session registration and rotation endpoints."""
+from unittest.mock import AsyncMock
 from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
@@ -45,8 +46,8 @@ def test_register_and_rotate_session_endpoints(monkeypatch):
 
     monkeypatch.setattr(
         security_dependencies,
-        "verify_token",
-        lambda _token: SimpleNamespace(sub=user_sub),
+        "verify_token_async",
+        AsyncMock(return_value=SimpleNamespace(sub=user_sub)),
     )
     app.dependency_overrides[get_db] = _override_get_db
 

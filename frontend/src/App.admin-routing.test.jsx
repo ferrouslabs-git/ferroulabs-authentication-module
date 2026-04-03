@@ -2,7 +2,7 @@
 
 import React from 'react'
 import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, render, screen } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
 import { MemoryRouter } from 'react-router-dom'
 import App from './App'
@@ -61,7 +61,7 @@ describe('Admin Routing Visibility', () => {
     cleanup()
   })
 
-  it('shows User Management nav button for authenticated tenant admin', () => {
+  it('does not show legacy User Management nav button for authenticated users', () => {
     authState.isAuthenticated = true
     authState.user = { is_platform_admin: false }
     authState.tenantId = 'tenant-1'
@@ -69,10 +69,11 @@ describe('Admin Routing Visibility', () => {
 
     renderApp('/dashboard')
 
-    expect(screen.getByRole('button', { name: /^user management$/i })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /^user management$/i })).not.toBeInTheDocument()
+    expect(screen.getByText(/welcome aboard/i)).toBeInTheDocument()
   })
 
-  it('hides User Management nav button for authenticated tenant member', () => {
+  it('keeps User Management nav hidden for authenticated tenant members', () => {
     authState.isAuthenticated = true
     authState.user = { is_platform_admin: false }
     authState.tenantId = 'tenant-1'
@@ -81,9 +82,10 @@ describe('Admin Routing Visibility', () => {
     renderApp('/dashboard')
 
     expect(screen.queryByRole('button', { name: /^user management$/i })).not.toBeInTheDocument()
+    expect(screen.getByText(/welcome aboard/i)).toBeInTheDocument()
   })
 
-  it('shows User Management nav button for platform admin without selected tenant', () => {
+  it('keeps User Management nav hidden for platform admin without selected tenant', () => {
     authState.isAuthenticated = true
     authState.user = { is_platform_admin: true }
     authState.tenantId = null
@@ -91,10 +93,11 @@ describe('Admin Routing Visibility', () => {
 
     renderApp('/dashboard')
 
-    expect(screen.getByRole('button', { name: /^user management$/i })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /^user management$/i })).not.toBeInTheDocument()
+    expect(screen.getByText(/welcome aboard/i)).toBeInTheDocument()
   })
 
-  it('routes platform admin without selected tenant directly to admin dashboard', () => {
+  it('routes /dashboard to onboarding instead of legacy admin dashboard', () => {
     authState.isAuthenticated = true
     authState.user = { is_platform_admin: true }
     authState.tenantId = null
@@ -102,29 +105,23 @@ describe('Admin Routing Visibility', () => {
 
     renderApp('/dashboard')
 
-    fireEvent.click(screen.getByRole('button', { name: /^user management$/i }))
-
-    expect(screen.getByText('Mock Admin Dashboard')).toBeInTheDocument()
+    expect(screen.queryByText('Mock Admin Dashboard')).not.toBeInTheDocument()
+    expect(screen.getByText(/welcome aboard/i)).toBeInTheDocument()
   })
 
-  it('auto-routes from dashboard to admin when pending intent exists and tenant is selected', () => {
+  it('ignores legacy pending admin intent and keeps dashboard on onboarding', () => {
     authState.isAuthenticated = true
     authState.user = { is_platform_admin: true }
     authState.tenantId = 'tenant-1'
     authState.tenants = [{ id: 'tenant-1', role: 'admin', name: 'Tenant One' }]
 
-    renderApp({
-      pathname: '/dashboard',
-      state: {
-        pendingAdminRoute: true,
-        focusTenantSelector: true,
-      },
-    })
+    renderApp('/dashboard')
 
-    expect(screen.getByText('Mock Admin Dashboard')).toBeInTheDocument()
+    expect(screen.queryByText('Mock Admin Dashboard')).not.toBeInTheDocument()
+    expect(screen.getByText(/welcome aboard/i)).toBeInTheDocument()
   })
 
-  it('renders admin dashboard when /admin is visited by authorized user', () => {
+  it('redirects /admin to splash flow for authenticated users', () => {
     authState.isAuthenticated = true
     authState.user = { is_platform_admin: true }
     authState.tenantId = 'tenant-1'
@@ -132,13 +129,14 @@ describe('Admin Routing Visibility', () => {
 
     renderApp('/admin')
 
-    expect(screen.getByText('Mock Admin Dashboard')).toBeInTheDocument()
+    expect(screen.queryByText('Mock Admin Dashboard')).not.toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: /accelerate your growth/i })).toBeInTheDocument()
   })
 
-  it('redirects away from /admin when unauthenticated', () => {
+  it('redirects /admin to splash flow for unauthenticated users', () => {
     renderApp('/admin')
 
     expect(screen.queryByText('Mock Admin Dashboard')).not.toBeInTheDocument()
-    expect(screen.getByText(/welcome to ferrouslab authentication/i)).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: /accelerate your growth/i })).toBeInTheDocument()
   })
 })

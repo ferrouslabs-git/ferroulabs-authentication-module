@@ -74,7 +74,7 @@ def _setup_app(SessionLocal):
 
 
 class TestAuthSync:
-    @patch("app.auth_usermanagement.api.auth_routes.verify_token")
+    @patch("app.auth_usermanagement.api.auth_routes.verify_token_async")
     def test_sync_creates_new_user(self, mock_verify):
         mock_verify.return_value = _FAKE_ID_PAYLOAD
         engine, SessionLocal = _make_db()
@@ -90,7 +90,7 @@ class TestAuthSync:
         finally:
             Base.metadata.drop_all(engine)
 
-    @patch("app.auth_usermanagement.api.auth_routes.verify_token")
+    @patch("app.auth_usermanagement.api.auth_routes.verify_token_async")
     def test_sync_idempotent(self, mock_verify):
         mock_verify.return_value = _FAKE_ID_PAYLOAD
         engine, SessionLocal = _make_db()
@@ -123,7 +123,7 @@ class TestAuthSync:
         finally:
             Base.metadata.drop_all(engine)
 
-    @patch("app.auth_usermanagement.api.auth_routes.verify_token")
+    @patch("app.auth_usermanagement.api.auth_routes.verify_token_async")
     def test_sync_missing_email_returns_400(self, mock_verify):
         mock_verify.return_value = TokenPayload(
             sub="no-email-sub", exp=99999999999, iat=1000000000, token_use="access",
@@ -142,7 +142,7 @@ class TestAuthSync:
 
 
 class TestAuthMe:
-    @patch("app.auth_usermanagement.security.dependencies.verify_token")
+    @patch("app.auth_usermanagement.security.dependencies.verify_token_async")
     def test_me_returns_user_profile(self, mock_verify):
         mock_verify.return_value = _FAKE_PAYLOAD
         engine, SessionLocal = _make_db()
@@ -164,7 +164,7 @@ class TestAuthMe:
         finally:
             Base.metadata.drop_all(engine)
 
-    @patch("app.auth_usermanagement.security.dependencies.verify_token")
+    @patch("app.auth_usermanagement.security.dependencies.verify_token_async")
     def test_me_suspended_user_rejected(self, mock_verify):
         mock_verify.return_value = _FAKE_PAYLOAD
         engine, SessionLocal = _make_db()
@@ -201,7 +201,7 @@ class TestAuthMe:
 
 
 class TestAuthMeMemberships:
-    @patch("app.auth_usermanagement.security.dependencies.verify_token")
+    @patch("app.auth_usermanagement.security.dependencies.verify_token_async")
     def test_memberships_returns_active_memberships(self, mock_verify):
         mock_verify.return_value = _FAKE_PAYLOAD
         engine, SessionLocal = _make_db()
@@ -231,7 +231,7 @@ class TestAuthMeMemberships:
         finally:
             Base.metadata.drop_all(engine)
 
-    @patch("app.auth_usermanagement.security.dependencies.verify_token")
+    @patch("app.auth_usermanagement.security.dependencies.verify_token_async")
     def test_memberships_excludes_removed(self, mock_verify):
         mock_verify.return_value = _FAKE_PAYLOAD
         engine, SessionLocal = _make_db()
@@ -257,7 +257,7 @@ class TestAuthMeMemberships:
         finally:
             Base.metadata.drop_all(engine)
 
-    @patch("app.auth_usermanagement.security.dependencies.verify_token")
+    @patch("app.auth_usermanagement.security.dependencies.verify_token_async")
     def test_memberships_empty_for_new_user(self, mock_verify):
         mock_verify.return_value = _FAKE_PAYLOAD
         engine, SessionLocal = _make_db()

@@ -109,7 +109,7 @@ class TestJWKSCache:
         cache._jwks = {"keys": []}
         cache._fetched_at = time.monotonic() - 2  # Expired
 
-        with patch.object(cache, "_fetch", return_value=_TEST_JWKS) as mock_fetch:
+        with patch.object(cache, "_fetch_sync", return_value=_TEST_JWKS) as mock_fetch:
             result = cache.get()
             mock_fetch.assert_called_once()
             assert result == _TEST_JWKS
@@ -119,17 +119,16 @@ class TestJWKSCache:
         cache._jwks = {"keys": [{"kid": "old"}]}
         cache._fetched_at = time.monotonic() - 2  # Expired
 
-        with patch.object(cache, "_fetch", side_effect=Exception("network")) as mock_fetch:
-            import requests
-            with patch.object(cache, "_fetch", side_effect=requests.RequestException("timeout")):
-                result = cache.get()
-                assert result == {"keys": [{"kid": "old"}]}
+        import httpx
+        with patch.object(cache, "_fetch_sync", side_effect=httpx.HTTPError("timeout")):
+            result = cache.get()
+            assert result == {"keys": [{"kid": "old"}]}
 
     def test_cache_raises_on_first_fetch_failure(self):
         cache = _JWKSCache(ttl=60)
         # No cached value at all
-        import requests
-        with patch.object(cache, "_fetch", side_effect=requests.RequestException("timeout")):
+        import httpx
+        with patch.object(cache, "_fetch_sync", side_effect=httpx.HTTPError("timeout")):
             with pytest.raises(InvalidTokenError, match="JWKS"):
                 cache.get()
 

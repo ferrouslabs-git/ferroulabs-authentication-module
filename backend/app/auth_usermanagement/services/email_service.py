@@ -3,6 +3,7 @@ Email service for invitation delivery via AWS SES.
 """
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 import logging
 
@@ -70,7 +71,11 @@ If you didn't expect this invitation, you can safely ignore this email.
 
 
 async def send_invitation_email(to_email: str, invite_url: str, tenant_name: str) -> EmailSendResult:
-    """Send invitation email via AWS SES."""
+    """Send invitation email via AWS SES.
+
+    Offloads the blocking boto3 SES call to a thread so the async
+    event loop stays free.
+    """
     settings = get_settings()
 
     if not settings.ses_region or not settings.ses_sender_email:
@@ -87,13 +92,18 @@ async def send_invitation_email(to_email: str, invite_url: str, tenant_name: str
             detail="SES not configured (missing SES_REGION or SES_SENDER_EMAIL)",
         )
 
-    # Create SES client
+    return await asyncio.to_thread(
+        _send_email_sync, to_email, invite_url, tenant_name, settings,
+    )
+
+
+def _send_email_sync(to_email: str, invite_url: str, tenant_name: str, settings) -> EmailSendResult:
+    """Synchronous SES send — called via asyncio.to_thread."""
     ses_client = boto3.client(
         "ses",
         region_name=settings.ses_region,
     )
 
-    # Prepare email content
     subject = f"Invitation to join {tenant_name}"
     html_body = _get_invitation_email_html(invite_url, tenant_name)
     text_body = _get_invitation_email_text(invite_url, tenant_name)

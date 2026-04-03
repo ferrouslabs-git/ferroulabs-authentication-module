@@ -83,7 +83,7 @@ def _make_app(SessionLocal):
 
 
 class TestFullAuthLifecycle:
-    @patch("app.auth_usermanagement.api.auth_routes.verify_token")
+    @patch("app.auth_usermanagement.api.auth_routes.verify_token_async")
     def test_sync_then_profile_then_memberships(self, mock_verify):
         """
         Simulate: user logs in via Cognito → syncs to DB → gets profile → gets memberships.
@@ -99,7 +99,7 @@ class TestFullAuthLifecycle:
 
             # Override get_current_user to use our DB
             from app.auth_usermanagement.security.dependencies import get_current_user, verify_token as dep_verify
-            with patch("app.auth_usermanagement.security.dependencies.verify_token") as dep_mock:
+            with patch("app.auth_usermanagement.security.dependencies.verify_token_async") as dep_mock:
                 dep_mock.return_value = TokenPayload(
                     sub="e2e-sub-1", email="e2e@lifecycle.test",
                     exp=99999999999, iat=1000000000, token_use="access", client_id="test",

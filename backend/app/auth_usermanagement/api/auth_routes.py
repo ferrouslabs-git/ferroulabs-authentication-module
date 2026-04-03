@@ -9,7 +9,7 @@ from ..models.membership import Membership
 from ..models.tenant import Tenant
 from ..models.user import User
 from ..schemas.user_management import MembershipListResponse
-from ..security import InvalidTokenError, get_current_user, verify_token
+from ..security import InvalidTokenError, get_current_user, verify_token_async
 from ..services.user_service import sync_user_from_cognito
 
 router = APIRouter()
@@ -49,7 +49,7 @@ async def debug_token(authorization: Optional[str] = Header(None)):
         )
 
     try:
-        payload = verify_token(token)
+        payload = await verify_token_async(token)
         claims = payload.model_dump() if hasattr(payload, "model_dump") else payload.dict()
         return {
             "status": "valid",
@@ -108,7 +108,7 @@ async def sync_user(
         )
 
     try:
-        token_payload = verify_token(token, allowed_token_uses=("access", "id"))
+        token_payload = await verify_token_async(token, allowed_token_uses=("access", "id"))
     except InvalidTokenError as exc:
         raise exc
 

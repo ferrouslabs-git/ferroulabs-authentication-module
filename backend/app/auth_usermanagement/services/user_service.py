@@ -1,6 +1,7 @@
 """
 User service - handles user sync and lookup operations
 """
+import asyncio
 import logging
 
 import boto3
@@ -309,3 +310,16 @@ def delete_user(user_id: UUID, db: Session) -> dict:
         "email": user.email,
         "cognito_deleted": cognito_result.get("deleted", False),
     }
+
+
+# ── Async wrappers (offload blocking boto3/DB to thread) ────────
+
+
+async def suspend_user_async(user_id: UUID, db: Session) -> User:
+    """Async wrapper for suspend_user — offloads Cognito sign-out to thread."""
+    return await asyncio.to_thread(suspend_user, user_id, db)
+
+
+async def delete_user_async(user_id: UUID, db: Session) -> dict:
+    """Async wrapper for delete_user — offloads Cognito deletion to thread."""
+    return await asyncio.to_thread(delete_user, user_id, db)

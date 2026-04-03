@@ -10,18 +10,18 @@ from ..schemas.user_management import PlatformUserResponse
 from ..security import get_current_user
 from ..services.audit_service import log_audit_event
 from ..services.user_service import (
-    delete_user,
+    delete_user_async,
     demote_from_platform_admin,
     get_user_by_id,
     promote_to_platform_admin,
-    suspend_user,
+    suspend_user_async,
     unsuspend_user,
 )
 from ..services.cognito_admin_service import (
-    admin_disable_user,
-    admin_enable_user,
-    admin_get_user,
-    admin_reset_user_password,
+    admin_disable_user_async,
+    admin_enable_user_async,
+    admin_get_user_async,
+    admin_reset_user_password_async,
 )
 from ..services.user_management_service import list_platform_users
 from .route_helpers import build_user_status_response, ensure_not_self_target, ensure_platform_admin
@@ -94,7 +94,7 @@ async def suspend_user_account(
     ensure_not_self_target(user_id, current_user)
 
     try:
-        suspended_user = suspend_user(user_id, db)
+        suspended_user = await suspend_user_async(user_id, db)
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -235,7 +235,7 @@ async def delete_platform_user(
     ensure_not_self_target(user_id, current_user)
 
     try:
-        result = delete_user(user_id, db)
+        result = await delete_user_async(user_id, db)
     except ValueError as exc:
         detail = str(exc)
         code = status.HTTP_404_NOT_FOUND
@@ -274,7 +274,7 @@ async def disable_cognito_user(
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
-    result = admin_disable_user(user.email)
+    result = await admin_disable_user_async(user.email)
     if "error" in result:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=result["error"])
 
@@ -302,7 +302,7 @@ async def enable_cognito_user(
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
-    result = admin_enable_user(user.email)
+    result = await admin_enable_user_async(user.email)
     if "error" in result:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=result["error"])
 
@@ -330,7 +330,7 @@ async def get_cognito_user_status(
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
-    result = admin_get_user(user.email)
+    result = await admin_get_user_async(user.email)
     if "error" in result:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=result["error"])
 
@@ -356,7 +356,7 @@ async def reset_cognito_user_password(
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
-    result = admin_reset_user_password(user.email)
+    result = await admin_reset_user_password_async(user.email)
     if "error" in result:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=result["error"])
 

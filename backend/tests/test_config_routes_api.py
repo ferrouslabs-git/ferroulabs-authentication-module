@@ -63,7 +63,7 @@ def _setup_app(SessionLocal, user=None, is_super_admin=False):
 
 
 class TestGetRoles:
-    @patch("app.auth_usermanagement.security.dependencies.verify_token")
+    @patch("app.auth_usermanagement.security.dependencies.verify_token_async")
     def test_roles_returns_structure(self, mock_verify):
         mock_verify.return_value = _FAKE_PAYLOAD
         engine, SessionLocal = _make_db()
@@ -108,7 +108,7 @@ class TestGetRoles:
 
 
 class TestGetPermissions:
-    @patch("app.auth_usermanagement.security.dependencies.verify_token")
+    @patch("app.auth_usermanagement.security.dependencies.verify_token_async")
     def test_permissions_as_super_admin(self, mock_verify):
         mock_verify.return_value = _FAKE_PAYLOAD
         engine, SessionLocal = _make_db()
@@ -148,7 +148,7 @@ class TestGetPermissions:
             db_s.close()
             Base.metadata.drop_all(engine)
 
-    @patch("app.auth_usermanagement.security.dependencies.verify_token")
+    @patch("app.auth_usermanagement.security.dependencies.verify_token_async")
     def test_permissions_denied_for_non_admin(self, mock_verify):
         mock_verify.return_value = _FAKE_PAYLOAD
         engine, SessionLocal = _make_db()
