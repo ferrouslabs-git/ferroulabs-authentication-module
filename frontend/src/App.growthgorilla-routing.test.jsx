@@ -15,6 +15,9 @@ const authState = {
 }
 
 vi.mock('./auth_usermanagement', () => ({
+  AUTH_CONFIG: {
+    callbackPath: '/callback',
+  },
   useAuth: () => authState,
   CustomSignupForm: ({ onConfirmed, onSwitchToLogin }) => (
     <div data-testid="signup-form">
@@ -162,10 +165,10 @@ describe('GrowthGorilla POC Routes', () => {
       expect(pageText).toBeInTheDocument()
     })
 
-    it('contains navigation buttons to signup and dashboard', () => {
+    it('contains navigation to signup only', () => {
       renderApp('/wheel')
       expect(screen.getByRole('button', { name: /signup/i })).toBeInTheDocument()
-      expect(screen.getByRole('button', { name: /dashboard/i })).toBeInTheDocument()
+      expect(screen.getByRole('link', { name: /sign up/i })).toBeInTheDocument()
     })
   })
 
@@ -175,10 +178,10 @@ describe('GrowthGorilla POC Routes', () => {
       expect(screen.getByTestId('signup-form')).toBeInTheDocument()
     })
 
-    it('redirects authenticated users to onboarding', () => {
+    it('redirects authenticated users to purchase', () => {
       authState.isAuthenticated = true
       renderApp('/signup')
-      expect(screen.getByText(/onboarding/i)).toBeInTheDocument()
+      expect(screen.getByText(/payment|purchase/i)).toBeInTheDocument()
     })
 
     it('shows funnel banner when context exists', async () => {
@@ -199,45 +202,23 @@ describe('GrowthGorilla POC Routes', () => {
   })
 
   describe('Login Route', () => {
-    it('displays login form', () => {
+    it('redirects /login to signup', () => {
       renderApp('/login')
-      expect(screen.getByTestId('login-form')).toBeInTheDocument()
-    })
-
-    it('displays social login buttons (Google, Microsoft)', () => {
-      renderApp('/login')
-      expect(screen.getByRole('button', { name: /google/i })).toBeInTheDocument()
-      expect(screen.getByRole('button', { name: /microsoft/i })).toBeInTheDocument()
-    })
-
-    it('displays forgot password form option', () => {
-      renderApp('/login')
-      expect(screen.getByTestId('forgot-password')).toBeInTheDocument()
-    })
-
-    it('pre-fills email from query param if provided', () => {
-      renderApp('/login?email=user@example.com')
-      expect(screen.getByTestId('login-form')).toBeInTheDocument()
-    })
-
-    it('redirects authenticated users to onboarding', () => {
-      authState.isAuthenticated = true
-      renderApp('/login')
-      expect(screen.getByText(/onboarding/i)).toBeInTheDocument()
+      expect(screen.getByTestId('signup-form')).toBeInTheDocument()
     })
   })
 
   describe('Callback Route', () => {
-    it('redirects unauthenticated users to login', () => {
+    it('shows callback completion message for unauthenticated users', () => {
       authState.isAuthenticated = false
       renderApp('/callback')
-      expect(screen.getByTestId('login-form')).toBeInTheDocument()
+      expect(screen.getByText(/completing sign-in/i)).toBeInTheDocument()
     })
 
-    it('redirects authenticated users to onboarding', () => {
+    it('redirects authenticated users to purchase', () => {
       authState.isAuthenticated = true
       renderApp('/callback')
-      expect(screen.getByText(/onboarding/i)).toBeInTheDocument()
+      expect(screen.getByText(/payment|purchase/i)).toBeInTheDocument()
     })
   })
 
@@ -248,10 +229,10 @@ describe('GrowthGorilla POC Routes', () => {
       expect(screen.getByText(/onboarding/i)).toBeInTheDocument()
     })
 
-    it('redirects unauthenticated users to login', () => {
+    it('allows unauthenticated users to view onboarding page in mock flow', () => {
       authState.isAuthenticated = false
       renderApp('/onboarding')
-      expect(screen.getByTestId('login-form')).toBeInTheDocument()
+      expect(screen.getByText(/onboarding|welcome aboard/i)).toBeInTheDocument()
     })
 
     it('contains buttons to finish onboarding, restart funnel, and sign out', () => {
@@ -264,41 +245,16 @@ describe('GrowthGorilla POC Routes', () => {
   })
 
   describe('Dashboard Route', () => {
-    it('displays dashboard page when authenticated', () => {
+    it('redirects /dashboard to onboarding', () => {
       authState.isAuthenticated = true
       renderApp('/dashboard')
-      expect(screen.getByText(/context|dashboard/i)).toBeInTheDocument()
+      expect(screen.getByText(/onboarding|welcome aboard/i)).toBeInTheDocument()
     })
 
-    it('redirects unauthenticated users to login', () => {
+    it('redirects /dashboard to onboarding for unauthenticated users too', () => {
       authState.isAuthenticated = false
       renderApp('/dashboard')
-      expect(screen.getByTestId('login-form')).toBeInTheDocument()
-    })
-
-    it('displays funnel context as JSON when available', async () => {
-      authState.isAuthenticated = true
-      sessionStorage.setItem(
-        'gg_funnel_context_v1',
-        JSON.stringify({
-          splashId: 'S2',
-          moduleTarget: 'module_a',
-          offer: { code: 'TWENTY_DOLLARS_OFF', label: '$20 off' },
-        }),
-      )
-      renderApp('/dashboard')
-      await waitFor(() => {
-        expect(screen.getByText(/S2/)).toBeInTheDocument()
-        expect(screen.getByText(/module_a/)).toBeInTheDocument()
-        expect(screen.getByText(/20.*off/i)).toBeInTheDocument()
-      })
-    })
-
-    it('contains restart funnel and sign out buttons', () => {
-      authState.isAuthenticated = true
-      renderApp('/dashboard')
-      expect(screen.getByRole('button', { name: /restart|splash/i })).toBeInTheDocument()
-      expect(screen.getByRole('button', { name: /sign out/i })).toBeInTheDocument()
+      expect(screen.getByText(/onboarding|welcome aboard/i)).toBeInTheDocument()
     })
   })
 
@@ -309,11 +265,11 @@ describe('GrowthGorilla POC Routes', () => {
       expect(screen.getByRole('link', { name: /wheel/i })).toBeInTheDocument()
     })
 
-    it('unauthenticated header shows signup and login options', () => {
+    it('unauthenticated header shows signup but no login link', () => {
       authState.isAuthenticated = false
       renderApp('/')
       expect(screen.getByRole('link', { name: /signup/i })).toBeInTheDocument()
-      expect(screen.getByRole('link', { name: /login/i })).toBeInTheDocument()
+      expect(screen.queryByRole('link', { name: /login/i })).not.toBeInTheDocument()
     })
 
     it('authenticated header shows sign out button', () => {
@@ -334,7 +290,7 @@ describe('GrowthGorilla POC Routes', () => {
         }),
       )
       authState.isAuthenticated = true
-      renderApp('/dashboard')
+      renderApp('/onboarding')
       await waitFor(() => {
         expect(screen.getByText(/journey context/i)).toBeInTheDocument()
         expect(screen.getByText(/S5/)).toBeInTheDocument()
@@ -362,8 +318,8 @@ describe('GrowthGorilla POC Routes', () => {
         }),
       )
 
-      // Navigate to dashboard
-      const { rerender } = renderApp('/dashboard')
+      // Navigate to onboarding
+      const { rerender } = renderApp('/onboarding')
       expect(sessionStorage.getItem('gg_funnel_context_v1')).toBeTruthy()
 
       // Navigate to different page

@@ -1,15 +1,11 @@
-import { Navigate, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../../auth_usermanagement";
 import { FunnelBanner } from "../components/FunnelBanner";
 import { theme, componentStyles } from "../theme";
 
 export function OnboardingPage() {
-  const { isAuthenticated, user, logout } = useAuth();
+  const { user, logout } = useAuth();
   const navigate = useNavigate();
-
-  if (!isAuthenticated) {
-    return <Navigate to="/login" replace />;
-  }
 
   const firstName = user?.name?.split(" ")[0] || user?.email?.split("@")[0] || "there";
 
@@ -52,8 +48,8 @@ export function OnboardingPage() {
         </div>
 
         <div style={styles.actions}>
-          <button style={styles.primary} onClick={() => navigate("/dashboard")}>
-            Continue to Dashboard →
+          <button style={styles.primary} onClick={() => navigate("/splash/S1")}>
+            Finish Onboarding
           </button>
           <button style={styles.secondary} onClick={() => navigate("/splash/S1")}>
             Explore Other Offers

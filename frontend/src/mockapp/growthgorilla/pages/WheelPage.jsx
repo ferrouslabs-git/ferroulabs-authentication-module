@@ -77,7 +77,6 @@ export function WheelPage() {
 
       <div style={styles.links}>
         <Link to="/signup" style={styles.link}>Go to Sign Up</Link>
-        <Link to="/login" style={styles.link}>Already a member? Log In</Link>
       </div>
     </div>
   );

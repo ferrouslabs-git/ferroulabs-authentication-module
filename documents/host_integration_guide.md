@@ -578,3 +578,4 @@ function App() {
 - [Custom UI Guide](custom_ui_integration_guide.md) — building your own login forms
 - [Cognito & SSO Guide](cognito_and_sso_guide.md) — AWS Cognito setup
 - [Submodule Integration Guide](submodule_integration_guide.md) — Git submodule setup and multi-module migrations
+- [Host App Module Stack Guide](host_app_module_stack_guide.md) — recommended host folder structure for auth + billing + llm integration

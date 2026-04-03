@@ -17,7 +17,9 @@ Business requirements captured:
 - One app owner (superadmin/platform admin).
 - User invite mode with referral reward: inviter gets free credit after invitee signs up and pays.
 - Login methods: email/password + Google + Microsoft SSO.
-- Onboarding stage after signup.
+- Two frontend mock flows for POC:
+  - direct login/forgot-password or signup -> payment page
+  - splash/wheel/signup -> payment page
 - 4 purchasable modules in one app account.
 - 20 splash pages leading to wheel-of-fortune offer page, then to variant-specific signup pages.
 - All signup variants use the same Cognito user pool.
@@ -47,6 +49,24 @@ Business requirements captured:
 
 ## 4. Target End-to-End Auth and Growth Flow
 
+## Mock Flow A (Direct Auth)
+1. User lands on `/login`.
+2. User can:
+  - login directly, or
+  - use forgot-password on the same page.
+3. User can switch to `/signup`.
+4. On successful signup confirmation, route to direct payment page.
+5. Direct payment page is mock-only (no backend action).
+
+## Mock Flow B (Splash Funnel)
+1. User lands on splash page `S1..S20`.
+2. User enters wheel-of-fortune page.
+3. Wheel assigns offer and host stores funnel context.
+4. User continues to signup page.
+5. On successful signup confirmation, route to offer payment page.
+6. Offer payment page shows splash/module/offer context.
+7. Offer payment page is mock-only (no backend action).
+
 ## Anonymous acquisition flow
 1. User lands on splash page `S1..S20`.
 2. Host app stores acquisition context:
@@ -62,23 +82,17 @@ Business requirements captured:
 ## Signup journey
 1. Signup page submits to module custom signup flow (`/auth/custom/signup`) or hosted UI equivalent.
 2. If confirmation is required, user completes confirm flow (`/auth/custom/confirm` + optional resend).
-3. After successful signup confirmation, frontend immediately initiates login.
-4. Login response returns Cognito tokens.
-5. Frontend runs session establishment:
-   - store refresh token in secure HttpOnly cookie via backend endpoint.
-   - register backend session.
-6. Backend syncs/creates local user profile if not present.
-7. Host app links pre-auth attribution data to the authenticated user.
-8. Host app creates onboarding state for this new user.
-9. User is redirected to onboarding start.
+3. After successful signup confirmation, frontend routes user to the appropriate mock payment page:
+  - direct flow -> basic payment page
+  - splash flow -> offer payment page
+4. Payment pages are display-only in this POC (CTA is no-op).
 
 ## Login after signup (required behavior)
 - New user should not remain in a dead-end "signup complete" state.
 - After signup confirmation:
-  - run login immediately (email/password or SSO callback completion),
-  - establish refresh cookie + backend session,
-  - complete user sync,
-  - redirect to onboarding step 1 (or module starter page if onboarding already complete).
+  - route straight to mock payment page,
+  - let user review plan/offer details,
+  - keep payment action as no-op for frontend POC.
 
 ## Returning login journey
 1. User selects login method:

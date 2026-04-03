@@ -8,7 +8,7 @@ export function SignupPage() {
   const navigate = useNavigate();
 
   if (isAuthenticated) {
-    return <Navigate to="/onboarding" replace />;
+    return <Navigate to="/purchase" replace />;
   }
 
   return (
@@ -22,10 +22,9 @@ export function SignupPage() {
           </p>
         </div>
         <CustomSignupForm
-          onConfirmed={(email) => {
-            navigate(`/login?email=${encodeURIComponent(email)}`);
+          onConfirmed={() => {
+            navigate("/purchase");
           }}
-          onSwitchToLogin={() => navigate("/login")}
         />
       </div>
     </div>

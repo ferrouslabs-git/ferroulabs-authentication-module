@@ -1,11 +1,12 @@
 import { Link, Navigate, Route, Routes } from "react-router-dom";
 import { AUTH_CONFIG, useAuth } from "./auth_usermanagement";
-import { DashboardPage } from "./mockapp/growthgorilla/pages/DashboardPage";
 import { LoginPage } from "./mockapp/growthgorilla/pages/LoginPage";
 import { OnboardingPage } from "./mockapp/growthgorilla/pages/OnboardingPage";
+import { PurchasePage } from "./mockapp/growthgorilla/pages/PurchasePage";
 import { SignupPage } from "./mockapp/growthgorilla/pages/SignupPage";
 import { SplashPage } from "./mockapp/growthgorilla/pages/SplashPage";
 import { WheelPage } from "./mockapp/growthgorilla/pages/WheelPage";
+import { FlowEntryPage } from "./mockapp/growthgorilla/pages/FlowEntryPage";
 
 function AppShell({ children }) {
   const { isAuthenticated, logout } = useAuth();
@@ -15,11 +16,12 @@ function AppShell({ children }) {
       <header style={styles.header}>
         <div style={styles.brand}>GrowthGorilla POC</div>
         <nav style={styles.nav}>
+          <Link style={styles.navLink} to="/">Home</Link>
+          <Link style={styles.navLink} to="/normal">Normal Route</Link>
+          <Link style={styles.navLink} to="/splash">Splash Route</Link>
           <Link style={styles.navLink} to="/splash/S1">Splash</Link>
           <Link style={styles.navLink} to="/wheel">Wheel</Link>
           <Link style={styles.navLink} to="/signup">Signup</Link>
-          <Link style={styles.navLink} to="/login">Login</Link>
-          {isAuthenticated ? <Link style={styles.navLink} to="/dashboard">Dashboard</Link> : null}
           {isAuthenticated ? (
             <button style={styles.signOutButton} onClick={logout}>Sign out</button>
           ) : null}
@@ -34,7 +36,7 @@ function AppShell({ children }) {
 function CallbackPage() {
   const { isAuthenticated, isLoading } = useAuth();
   if (isAuthenticated) {
-    return <Navigate to="/onboarding" replace />;
+    return <Navigate to="/purchase" replace />;
   }
 
   return (
@@ -47,7 +49,7 @@ function CallbackPage() {
 }
 
 function HomeRoute() {
-  return <Navigate to="/splash/S1" replace />;
+  return <FlowEntryPage />;
 }
 
 function App() {
@@ -55,12 +57,15 @@ function App() {
     <AppShell>
       <Routes>
         <Route path="/" element={<HomeRoute />} />
+        <Route path="/normal" element={<Navigate to="/login" replace />} />
+        <Route path="/splash" element={<Navigate to="/splash/S1" replace />} />
         <Route path="/splash/:splashId" element={<SplashPage />} />
         <Route path="/wheel" element={<WheelPage />} />
         <Route path="/signup" element={<SignupPage />} />
         <Route path="/login" element={<LoginPage />} />
+        <Route path="/purchase" element={<PurchasePage />} />
         <Route path="/onboarding" element={<OnboardingPage />} />
-        <Route path="/dashboard" element={<DashboardPage />} />
+        <Route path="/dashboard" element={<Navigate to="/onboarding" replace />} />
         <Route path={AUTH_CONFIG.callbackPath} element={<CallbackPage />} />
         <Route path="*" element={<Navigate to="/splash/S1" replace />} />
       </Routes>
