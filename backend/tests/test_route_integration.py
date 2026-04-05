@@ -789,9 +789,23 @@ class TestRevokeSession:
 
 
 class TestDebugToken:
-    """GET /debug-token — covers auth_routes lines 38-62."""
+    """GET /debug-token — gated behind AUTH_DEBUG env var."""
+
+    def test_debug_token_hidden_without_auth_debug(self, monkeypatch):
+        """Route returns 404 when AUTH_DEBUG is not set."""
+        monkeypatch.delenv("AUTH_DEBUG", raising=False)
+        sync_engine, SL, async_engine, ASL = _make_db()
+        _seed(SL)
+        try:
+            with _client(monkeypatch, ASL, "owner-sub") as c:
+                r = c.get("/auth/debug-token", headers=_auth())
+                assert r.status_code == 404
+        finally:
+            app.dependency_overrides.clear()
+            Base.metadata.drop_all(sync_engine)
 
     def test_debug_token_missing_header(self, monkeypatch):
+        monkeypatch.setenv("AUTH_DEBUG", "1")
         sync_engine, SL, async_engine, ASL = _make_db()
         _seed(SL)
         try:
@@ -803,6 +817,7 @@ class TestDebugToken:
             Base.metadata.drop_all(sync_engine)
 
     def test_debug_token_wrong_scheme(self, monkeypatch):
+        monkeypatch.setenv("AUTH_DEBUG", "1")
         sync_engine, SL, async_engine, ASL = _make_db()
         _seed(SL)
         try:
@@ -814,6 +829,7 @@ class TestDebugToken:
             Base.metadata.drop_all(sync_engine)
 
     def test_debug_token_malformed_header(self, monkeypatch):
+        monkeypatch.setenv("AUTH_DEBUG", "1")
         sync_engine, SL, async_engine, ASL = _make_db()
         _seed(SL)
         try:
@@ -825,6 +841,7 @@ class TestDebugToken:
             Base.metadata.drop_all(sync_engine)
 
     def test_debug_token_valid(self, monkeypatch):
+        monkeypatch.setenv("AUTH_DEBUG", "1")
         sync_engine, SL, async_engine, ASL = _make_db()
         _seed(SL)
         try:

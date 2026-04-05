@@ -63,8 +63,12 @@ class _FakeSession:
         self.refreshed.append(obj)
 
     async def execute(self, stmt, *args, **kwargs):
-        """Route selects based on model being queried."""
-        # Inspect the statement to figure out which model is being queried
+        """Route selects based on model being queried.
+
+        WARNING: Routing uses str(stmt) string matching. If SQLAlchemy changes
+        its SQL rendering, the routing may silently fall through to the default
+        _FakeResult(None), causing tests to pass for the wrong reason.
+        """
         stmt_str = str(stmt)
         if "membership" in stmt_str.lower():
             return _FakeResult(self.membership_result)
@@ -89,6 +93,7 @@ def _invitation(email: str = "user@example.com", role_name: str = "account_membe
         tenant_id=uuid4(),
         email=email,
         token="tok",
+        token_hash="tok",
         expires_at=_utcnow() + timedelta(days=days),
         created_by=uuid4(),
         target_scope_type="account",
@@ -151,6 +156,7 @@ async def test_create_invitation_expires_previous_pending_for_same_email_and_ten
 
     assert pending.expires_at <= _utcnow()
     assert pending.expires_at < original_expiry
+    assert pending.revoked_at is not None  # old invitation marked revoked
     assert invitation.token != pending.token
     assert db.commits == 1
 
@@ -240,6 +246,7 @@ async def test_accept_invitation_creates_membership_for_new_user():
 async def test_revoke_invitation_marks_pending_invitation_revoked():
     db = _FakeSession()
     invitation = _invitation()
+    original_expiry = invitation.expires_at
 
     result = await revoke_invitation(db, invitation)
 
@@ -247,6 +254,8 @@ async def test_revoke_invitation_marks_pending_invitation_revoked():
     assert invitation.revoked_at is not None
     assert invitation.is_revoked
     assert invitation.status == "revoked"
+    assert invitation.expires_at <= _utcnow()  # expires_at truncated to now
+    assert invitation.expires_at < original_expiry
     assert db.commits == 1
 
 
@@ -260,6 +269,25 @@ async def test_revoke_invitation_rejects_accepted_invitation():
 
 
 # ── Corner cases ────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_revoke_expired_but_unrevoked_invitation_succeeds():
+    """An expired invitation that was never revoked can still be revoked."""
+    db = _FakeSession()
+    invitation = _invitation(days=-1)  # expired
+    expired_at = invitation.expires_at
+    assert invitation.is_expired
+    assert not invitation.is_revoked
+
+    result = await revoke_invitation(db, invitation)
+
+    assert result is invitation
+    assert invitation.is_revoked
+    assert invitation.status == "revoked"
+    # expires_at stays unchanged because it is already in the past
+    assert invitation.expires_at == expired_at
+    assert db.commits == 1
 
 
 @pytest.mark.asyncio
@@ -423,6 +451,7 @@ async def test_resend_invitation_invalidates_old_token():
     db = _FakeSession()
     invitation = _invitation()
     old_hash = invitation.token_hash
+    assert old_hash == "tok"  # sanity: old_hash is a real value, not None
 
     _, new_raw = await resend_invitation(db, invitation)
 

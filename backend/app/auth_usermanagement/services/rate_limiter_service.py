@@ -3,6 +3,7 @@ Rate limiting service with in-memory and PostgreSQL backends.
 
 Provides a unified interface for distributed (PostgreSQL) and single-process (in-memory) rate limiting.
 """
+import logging
 from abc import ABC, abstractmethod
 from collections import defaultdict, deque
 from datetime import datetime, timedelta, UTC
@@ -10,6 +11,8 @@ from typing import Optional
 
 from sqlalchemy import select, delete as sa_delete, func
 from sqlalchemy.ext.asyncio import AsyncSession
+
+logger = logging.getLogger(__name__)
 
 
 class RateLimiter(ABC):
@@ -110,6 +113,7 @@ class PostgresRateLimiter(RateLimiter):
                 return False
         except Exception:
             # On DB error, fail open (allow request) rather than blocking all traffic
+            logger.exception("Rate limiter DB error — failing open for key=%s", key)
             return False
 
     async def close(self) -> None:

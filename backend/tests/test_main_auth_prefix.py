@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 
 def test_main_uses_configured_auth_prefix(monkeypatch):
     monkeypatch.setenv("AUTH_API_PREFIX", "/iam")
+    monkeypatch.setenv("AUTH_DEBUG", "1")
 
     import app.auth_usermanagement.config as auth_config
     auth_config.get_settings.cache_clear()
@@ -29,6 +30,7 @@ def test_main_uses_configured_auth_prefix(monkeypatch):
 def test_v1_versioned_prefix_works(monkeypatch):
     """Verify that host apps can set AUTH_API_PREFIX=/v1/auth for versioned routes."""
     monkeypatch.setenv("AUTH_API_PREFIX", "/v1/auth")
+    monkeypatch.setenv("AUTH_DEBUG", "1")
 
     import app.auth_usermanagement.config as auth_config
     auth_config.get_settings.cache_clear()

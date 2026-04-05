@@ -523,7 +523,8 @@ class TestSyncAndDebugWithRealToken:
             app.dependency_overrides.clear()
             Base.metadata.drop_all(sync_engine)
 
-    def test_debug_token_with_real_token(self, cognito_tokens):
+    def test_debug_token_with_real_token(self, cognito_tokens, monkeypatch):
+        monkeypatch.setenv("AUTH_DEBUG", "1")
         from app.database import Base
         from app.main import app
 
@@ -548,7 +549,8 @@ class TestSyncAndDebugWithRealToken:
 
 class TestFullAuthRoundTrip:
 
-    def test_login_sync_debug_roundtrip(self, test_user):
+    def test_login_sync_debug_roundtrip(self, test_user, monkeypatch):
+        monkeypatch.setenv("AUTH_DEBUG", "1")
         from app.database import Base
         from app.main import app
         from app.auth_usermanagement.models.tenant import Tenant

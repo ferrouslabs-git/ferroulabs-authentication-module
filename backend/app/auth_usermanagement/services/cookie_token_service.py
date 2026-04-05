@@ -3,6 +3,12 @@ Cookie-based refresh token service.
 
 Handles setting/clearing the HttpOnly refresh token cookie and proxying
 token refresh requests to Cognito on behalf of the frontend.
+
+Security note: Refresh tokens are stored as-is because Cognito requires
+the original value for token refresh calls.  The opaque ``cookie_key``
+(a random 43-char URL-safe string) is the security boundary — it is
+never sent to Cognito and only travels in an HttpOnly/Secure/SameSite
+cookie.
 """
 import json
 from datetime import datetime, timedelta, UTC
@@ -47,7 +53,7 @@ async def store_refresh_token(db: AsyncSession, refresh_token: str) -> str:
 
 
 async def get_refresh_token(db: AsyncSession, cookie_key: str) -> str | None:
-    """Resolve an opaque cookie key to a live refresh token."""
+    """Resolve an opaque cookie key to a live Cognito refresh token."""
     if not cookie_key:
         return None
     await _purge_expired_tokens(db)

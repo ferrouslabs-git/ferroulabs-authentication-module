@@ -1,3 +1,4 @@
+import os
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException, status
@@ -20,15 +21,11 @@ router = APIRouter()
 async def debug_token(authorization: Optional[str] = Header(None)):
     """
     Debug endpoint to test JWT token verification.
-
-    Phase 1 Test Checkpoint:
-    1. Get token from Cognito Hosted UI
-    2. Call: curl -H "Authorization: Bearer <token>" http://localhost:8000/auth/debug-token
-    3. Expected: User claims returned
-
-    Returns:
-        TokenPayload: Decoded and verified JWT claims
+    Only functional when AUTH_DEBUG=1 is set; returns 404 otherwise.
     """
+    if os.getenv("AUTH_DEBUG", "").lower() not in ("1", "true"):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+
     if not authorization:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
