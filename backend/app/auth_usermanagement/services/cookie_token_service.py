@@ -28,7 +28,7 @@ COOKIE_MAX_AGE = 30 * 24 * 60 * 60  # 30 days in seconds
 
 
 def _utc_now() -> datetime:
-    return datetime.now(UTC)
+    return datetime.now(UTC).replace(tzinfo=None)
 
 
 async def _purge_expired_tokens(db: AsyncSession) -> None:
