@@ -2,9 +2,7 @@
 
 import time
 
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
+import pytest
 
 from app.auth_usermanagement.services.rate_limiter_service import (
     InMemoryRateLimiter,
@@ -12,58 +10,66 @@ from app.auth_usermanagement.services.rate_limiter_service import (
     create_rate_limiter,
 )
 from app.database import Base
+from tests.async_test_utils import make_test_db, make_async_app
 
 
 # ── InMemoryRateLimiter ─────────────────────────────────────────
 
 
-def test_allows_requests_under_limit():
+@pytest.mark.asyncio
+async def test_allows_requests_under_limit():
     limiter = InMemoryRateLimiter()
-    assert limiter.is_rate_limited("key1", limit=3, window_seconds=60) is False
-    assert limiter.is_rate_limited("key1", limit=3, window_seconds=60) is False
-    assert limiter.is_rate_limited("key1", limit=3, window_seconds=60) is False
+    assert await limiter.is_rate_limited("key1", limit=3, window_seconds=60) is False
+    assert await limiter.is_rate_limited("key1", limit=3, window_seconds=60) is False
+    assert await limiter.is_rate_limited("key1", limit=3, window_seconds=60) is False
 
 
-def test_blocks_requests_over_limit():
+@pytest.mark.asyncio
+async def test_blocks_requests_over_limit():
     limiter = InMemoryRateLimiter()
     for _ in range(5):
-        limiter.is_rate_limited("flood", limit=5, window_seconds=60)
+        await limiter.is_rate_limited("flood", limit=5, window_seconds=60)
 
-    assert limiter.is_rate_limited("flood", limit=5, window_seconds=60) is True
+    assert await limiter.is_rate_limited("flood", limit=5, window_seconds=60) is True
 
 
-def test_different_keys_are_independent():
+@pytest.mark.asyncio
+async def test_different_keys_are_independent():
     limiter = InMemoryRateLimiter()
     for _ in range(3):
-        limiter.is_rate_limited("a", limit=3, window_seconds=60)
+        await limiter.is_rate_limited("a", limit=3, window_seconds=60)
 
-    assert limiter.is_rate_limited("a", limit=3, window_seconds=60) is True
-    assert limiter.is_rate_limited("b", limit=3, window_seconds=60) is False
+    assert await limiter.is_rate_limited("a", limit=3, window_seconds=60) is True
+    assert await limiter.is_rate_limited("b", limit=3, window_seconds=60) is False
 
 
-def test_window_expiration_allows_new_requests():
+@pytest.mark.asyncio
+async def test_window_expiration_allows_new_requests():
     limiter = InMemoryRateLimiter()
     # Fill to limit with a 1-second window
     for _ in range(2):
-        limiter.is_rate_limited("expire", limit=2, window_seconds=1)
+        await limiter.is_rate_limited("expire", limit=2, window_seconds=1)
 
-    assert limiter.is_rate_limited("expire", limit=2, window_seconds=1) is True
+    assert await limiter.is_rate_limited("expire", limit=2, window_seconds=1) is True
 
     # Wait for window to pass
-    time.sleep(1.1)
+    import asyncio
+    await asyncio.sleep(1.1)
 
-    assert limiter.is_rate_limited("expire", limit=2, window_seconds=1) is False
+    assert await limiter.is_rate_limited("expire", limit=2, window_seconds=1) is False
 
 
-def test_limit_of_one():
+@pytest.mark.asyncio
+async def test_limit_of_one():
     limiter = InMemoryRateLimiter()
-    assert limiter.is_rate_limited("single", limit=1, window_seconds=60) is False
-    assert limiter.is_rate_limited("single", limit=1, window_seconds=60) is True
+    assert await limiter.is_rate_limited("single", limit=1, window_seconds=60) is False
+    assert await limiter.is_rate_limited("single", limit=1, window_seconds=60) is True
 
 
-def test_close_is_noop():
+@pytest.mark.asyncio
+async def test_close_is_noop():
     limiter = InMemoryRateLimiter()
-    limiter.close()  # Should not raise
+    await limiter.close()  # Should not raise
 
 
 # ── Factory ──────────────────────────────────────────────────────
@@ -85,52 +91,49 @@ def test_create_rate_limiter_returns_postgres_when_factory_provided():
 
 
 def _make_db():
-    engine = create_engine(
-        "sqlite://",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
-    Base.metadata.create_all(engine)
-    SessionLocal = sessionmaker(bind=engine)
-    return engine, SessionLocal
+    return make_test_db()
 
 
-def test_postgres_limiter_allows_under_limit():
-    engine, SessionLocal = _make_db()
+@pytest.mark.asyncio
+async def test_postgres_limiter_allows_under_limit():
+    sync_engine, SyncSession, async_engine, AsyncSessionLocal = _make_db()
     try:
-        limiter = PostgresRateLimiter(db_factory=SessionLocal)
-        assert limiter.is_rate_limited("pg-key", limit=3, window_seconds=60) is False
-        assert limiter.is_rate_limited("pg-key", limit=3, window_seconds=60) is False
+        limiter = PostgresRateLimiter(db_factory=AsyncSessionLocal)
+        assert await limiter.is_rate_limited("pg-key", limit=3, window_seconds=60) is False
+        assert await limiter.is_rate_limited("pg-key", limit=3, window_seconds=60) is False
     finally:
-        Base.metadata.drop_all(engine)
+        Base.metadata.drop_all(sync_engine)
 
 
-def test_postgres_limiter_blocks_over_limit():
-    engine, SessionLocal = _make_db()
+@pytest.mark.asyncio
+async def test_postgres_limiter_blocks_over_limit():
+    sync_engine, SyncSession, async_engine, AsyncSessionLocal = _make_db()
     try:
-        limiter = PostgresRateLimiter(db_factory=SessionLocal)
+        limiter = PostgresRateLimiter(db_factory=AsyncSessionLocal)
         for _ in range(5):
-            limiter.is_rate_limited("pg-flood", limit=5, window_seconds=60)
+            await limiter.is_rate_limited("pg-flood", limit=5, window_seconds=60)
 
-        assert limiter.is_rate_limited("pg-flood", limit=5, window_seconds=60) is True
+        assert await limiter.is_rate_limited("pg-flood", limit=5, window_seconds=60) is True
     finally:
-        Base.metadata.drop_all(engine)
+        Base.metadata.drop_all(sync_engine)
 
 
-def test_postgres_limiter_independent_keys():
-    engine, SessionLocal = _make_db()
+@pytest.mark.asyncio
+async def test_postgres_limiter_independent_keys():
+    sync_engine, SyncSession, async_engine, AsyncSessionLocal = _make_db()
     try:
-        limiter = PostgresRateLimiter(db_factory=SessionLocal)
+        limiter = PostgresRateLimiter(db_factory=AsyncSessionLocal)
         for _ in range(2):
-            limiter.is_rate_limited("pg-a", limit=2, window_seconds=60)
+            await limiter.is_rate_limited("pg-a", limit=2, window_seconds=60)
 
-        assert limiter.is_rate_limited("pg-a", limit=2, window_seconds=60) is True
-        assert limiter.is_rate_limited("pg-b", limit=2, window_seconds=60) is False
+        assert await limiter.is_rate_limited("pg-a", limit=2, window_seconds=60) is True
+        assert await limiter.is_rate_limited("pg-b", limit=2, window_seconds=60) is False
     finally:
-        Base.metadata.drop_all(engine)
+        Base.metadata.drop_all(sync_engine)
 
 
-def test_postgres_limiter_fails_open_on_db_error():
+@pytest.mark.asyncio
+async def test_postgres_limiter_fails_open_on_db_error():
     """When the DB factory raises, the limiter should fail open (allow)."""
 
     def broken_factory():
@@ -138,13 +141,14 @@ def test_postgres_limiter_fails_open_on_db_error():
 
     limiter = PostgresRateLimiter(db_factory=broken_factory)
     # Should NOT raise — returns False (allow the request)
-    assert limiter.is_rate_limited("broken", limit=1, window_seconds=60) is False
+    assert await limiter.is_rate_limited("broken", limit=1, window_seconds=60) is False
 
 
-def test_postgres_limiter_close_is_noop():
-    engine, SessionLocal = _make_db()
+@pytest.mark.asyncio
+async def test_postgres_limiter_close_is_noop():
+    sync_engine, SyncSession, async_engine, AsyncSessionLocal = _make_db()
     try:
-        limiter = PostgresRateLimiter(db_factory=SessionLocal)
-        limiter.close()  # Should not raise
+        limiter = PostgresRateLimiter(db_factory=AsyncSessionLocal)
+        await limiter.close()  # Should not raise
     finally:
-        Base.metadata.drop_all(engine)
+        Base.metadata.drop_all(sync_engine)

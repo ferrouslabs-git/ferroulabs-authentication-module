@@ -2,7 +2,7 @@ from typing import List
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..database import get_db
 
@@ -34,21 +34,21 @@ router = APIRouter()
 async def create_new_tenant(
     tenant_data: TenantCreateRequest,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
 ):
     """
     Create a new tenant (organization).
     Requires authentication.
     Creator will be assigned 'owner' role automatically.
     """
-    tenant = create_tenant(
+    tenant = await create_tenant(
         name=tenant_data.name,
         user=current_user,
         db=db,
         plan=tenant_data.plan,
     )
 
-    log_audit_event(
+    await log_audit_event(
         "tenant_created",
         actor_user_id=str(current_user.id),
         db=db,
@@ -69,10 +69,10 @@ async def create_new_tenant(
 @router.get("/tenants/my", response_model=List[TenantListResponse])
 async def get_my_tenants(
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
 ):
     """Get all tenants that the current user belongs to."""
-    return get_user_tenants(current_user.id, db)
+    return await get_user_tenants(current_user.id, db)
 
 
 @router.get("/tenant-context")
@@ -97,13 +97,13 @@ async def get_tenant_context_info(ctx: ScopeContext = Depends(get_scope_context)
 async def get_tenant_detail(
     tenant_id: UUID,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
 ):
     """Get details for a single tenant. Requires membership or platform admin."""
-    if not current_user.is_platform_admin and not verify_user_tenant_access(current_user.id, tenant_id, db):
+    if not current_user.is_platform_admin and not await verify_user_tenant_access(current_user.id, tenant_id, db):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not a member of this tenant")
 
-    tenant = get_tenant_by_id(tenant_id, db)
+    tenant = await get_tenant_by_id(tenant_id, db)
     if not tenant:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tenant not found")
 
@@ -132,12 +132,12 @@ async def update_tenant_detail(
     tenant_id: UUID,
     payload: TenantUpdateRequest,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
 ):
     """Update tenant name/plan. Requires account_owner role or platform admin."""
     if not current_user.is_platform_admin:
         from ..services.tenant_service import get_user_tenant_role
-        role = get_user_tenant_role(current_user.id, tenant_id, db)
+        role = await get_user_tenant_role(current_user.id, tenant_id, db)
         if role not in ("account_owner", "owner"):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
@@ -151,11 +151,11 @@ async def update_tenant_detail(
         )
 
     try:
-        tenant = update_tenant(tenant_id, db, name=payload.name, plan=payload.plan)
+        tenant = await update_tenant(tenant_id, db, name=payload.name, plan=payload.plan)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
-    log_audit_event(
+    await log_audit_event(
         "tenant_updated",
         actor_user_id=str(current_user.id),
         db=db,
@@ -188,14 +188,14 @@ async def list_invitations_for_tenant(
     tenant_id: UUID,
     status_filter: str | None = Query(None, alias="status", description="Filter by status: pending, accepted, expired, revoked"),
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
 ):
     """List invitations for a tenant. Requires membership or platform admin."""
-    if not current_user.is_platform_admin and not verify_user_tenant_access(current_user.id, tenant_id, db):
+    if not current_user.is_platform_admin and not await verify_user_tenant_access(current_user.id, tenant_id, db):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not a member of this tenant")
 
     try:
-        return list_tenant_invitations(db, tenant_id, status_filter=status_filter)
+        return await list_tenant_invitations(db, tenant_id, status_filter=status_filter)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
@@ -212,16 +212,16 @@ async def bulk_create_invitations(
     tenant_id: UUID,
     payload: BulkInvitationCreateRequest,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
 ):
     """Send up to 50 invitations in one request. Requires membership or platform admin."""
-    if not current_user.is_platform_admin and not verify_user_tenant_access(current_user.id, tenant_id, db):
+    if not current_user.is_platform_admin and not await verify_user_tenant_access(current_user.id, tenant_id, db):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not a member of this tenant")
 
     results: list[BulkInvitationResultItem] = []
     for item in payload.invitations:
         try:
-            invitation, _raw_token = create_invitation(
+            invitation, _raw_token = await create_invitation(
                 db=db,
                 tenant_id=tenant_id,
                 email=item.email,

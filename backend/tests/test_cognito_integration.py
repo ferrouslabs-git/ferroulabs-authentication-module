@@ -18,9 +18,7 @@ import boto3
 import pytest
 from dotenv import load_dotenv
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
+from tests.async_test_utils import make_test_db, make_async_app
 
 load_dotenv()
 
@@ -359,7 +357,7 @@ class TestCustomUIRoutesReal:
             assert data["id_token"] is not None
         finally:
             app.dependency_overrides.clear()
-            Base.metadata.drop_all(engine)
+            Base.metadata.drop_all(sync_engine)
 
     def test_login_wrong_password(self, test_user):
         from app.database import Base
@@ -375,7 +373,7 @@ class TestCustomUIRoutesReal:
             assert r.status_code == 401
         finally:
             app.dependency_overrides.clear()
-            Base.metadata.drop_all(engine)
+            Base.metadata.drop_all(sync_engine)
 
     def test_login_nonexistent_user(self):
         from app.database import Base
@@ -391,7 +389,7 @@ class TestCustomUIRoutesReal:
             assert r.status_code == 401
         finally:
             app.dependency_overrides.clear()
-            Base.metadata.drop_all(engine)
+            Base.metadata.drop_all(sync_engine)
 
     def test_signup_creates_user(self):
         from app.database import Base
@@ -410,7 +408,7 @@ class TestCustomUIRoutesReal:
             assert data["user_sub"] is not None
         finally:
             app.dependency_overrides.clear()
-            Base.metadata.drop_all(engine)
+            Base.metadata.drop_all(sync_engine)
             _admin_delete_user(email)
 
     def test_forgot_password_endpoint(self, test_user):
@@ -428,7 +426,7 @@ class TestCustomUIRoutesReal:
             assert data["sent"] is True
         finally:
             app.dependency_overrides.clear()
-            Base.metadata.drop_all(engine)
+            Base.metadata.drop_all(sync_engine)
 
     def test_resend_code_endpoint(self, test_user):
         from app.database import Base
@@ -444,7 +442,7 @@ class TestCustomUIRoutesReal:
             assert r.status_code in (200, 400)
         finally:
             app.dependency_overrides.clear()
-            Base.metadata.drop_all(engine)
+            Base.metadata.drop_all(sync_engine)
 
     def test_invited_user_set_password_via_api(self):
         """Full invitation flow through HTTP endpoints."""
@@ -484,7 +482,7 @@ class TestCustomUIRoutesReal:
             assert data["access_token"] is not None
         finally:
             app.dependency_overrides.clear()
-            Base.metadata.drop_all(engine)
+            Base.metadata.drop_all(sync_engine)
             admin_delete_user(email)
 
 
@@ -523,7 +521,7 @@ class TestSyncAndDebugWithRealToken:
             assert data["cognito_sub"] is not None
         finally:
             app.dependency_overrides.clear()
-            Base.metadata.drop_all(engine)
+            Base.metadata.drop_all(sync_engine)
 
     def test_debug_token_with_real_token(self, cognito_tokens):
         from app.database import Base
@@ -542,7 +540,7 @@ class TestSyncAndDebugWithRealToken:
             assert data["claims"]["sub"] is not None
         finally:
             app.dependency_overrides.clear()
-            Base.metadata.drop_all(engine)
+            Base.metadata.drop_all(sync_engine)
 
 
 # ── 5. Full Auth Round-Trip ───────────────────────────────────────
@@ -595,4 +593,4 @@ class TestFullAuthRoundTrip:
             assert debug_r.json()["status"] == "valid"
         finally:
             app.dependency_overrides.clear()
-            Base.metadata.drop_all(engine)
+            Base.metadata.drop_all(sync_engine)

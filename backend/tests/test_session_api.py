@@ -3,14 +3,12 @@ from unittest.mock import AsyncMock
 from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
 
 from app.database import Base, get_db
 from app.main import app
 from app.auth_usermanagement.models.user import User
 from app.auth_usermanagement.security import dependencies as security_dependencies
+from tests.async_test_utils import make_test_db
 
 
 def _setup_user(session):
@@ -25,24 +23,15 @@ def _setup_user(session):
 
 
 def test_register_and_rotate_session_endpoints(monkeypatch):
-    engine = create_engine(
-        "sqlite://",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
-    SessionLocal = sessionmaker(bind=engine)
-    Base.metadata.create_all(engine)
+    sync_engine, SyncSession, async_engine, AsyncSessionLocal = make_test_db()
 
-    seed_session = SessionLocal()
+    seed_session = SyncSession()
     user_id, user_sub = _setup_user(seed_session)
     seed_session.close()
 
-    def _override_get_db():
-        db = SessionLocal()
-        try:
-            yield db
-        finally:
-            db.close()
+    async def _override_get_db():
+        async with AsyncSessionLocal() as session:
+            yield session
 
     monkeypatch.setattr(
         security_dependencies,
@@ -114,4 +103,4 @@ def test_register_and_rotate_session_endpoints(monkeypatch):
             assert bad_header.status_code == 400
     finally:
         app.dependency_overrides.clear()
-        Base.metadata.drop_all(engine)
+        Base.metadata.drop_all(sync_engine)

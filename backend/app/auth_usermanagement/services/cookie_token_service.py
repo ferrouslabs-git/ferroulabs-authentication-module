@@ -3,22 +3,15 @@ Cookie-based refresh token service.
 
 Handles setting/clearing the HttpOnly refresh token cookie and proxying
 token refresh requests to Cognito on behalf of the frontend.
-
-Security properties of the cookie:
-- HttpOnly: JS cannot read it
-- Secure: HTTPS only (enforced by browser in production)
-- SameSite=Strict: blocks cross-site cookie sending entirely
-- Path=/auth/token: scoped to the refresh endpoint only, not sent on every request
 """
-import urllib.parse
-import urllib.request
 import json
 from datetime import datetime, timedelta, UTC
 import secrets
 
 import httpx
 from fastapi import Response
-from sqlalchemy.orm import Session
+from sqlalchemy import select, delete as sa_delete
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models.refresh_token import RefreshTokenStore
 
@@ -32,16 +25,16 @@ def _utc_now() -> datetime:
     return datetime.now(UTC)
 
 
-def _purge_expired_tokens(db: Session) -> None:
+async def _purge_expired_tokens(db: AsyncSession) -> None:
     now = _utc_now()
-    db.query(RefreshTokenStore).filter(RefreshTokenStore.expires_at <= now).delete(synchronize_session=False)
+    await db.execute(sa_delete(RefreshTokenStore).where(RefreshTokenStore.expires_at <= now))
 
 
-def store_refresh_token(db: Session, refresh_token: str) -> str:
+async def store_refresh_token(db: AsyncSession, refresh_token: str) -> str:
     """Store refresh token server-side and return a short opaque cookie key."""
     key = secrets.token_urlsafe(32)
     expires_at = _utc_now() + timedelta(seconds=COOKIE_MAX_AGE)
-    _purge_expired_tokens(db)
+    await _purge_expired_tokens(db)
     db.add(
         RefreshTokenStore(
             cookie_key=key,
@@ -49,35 +42,42 @@ def store_refresh_token(db: Session, refresh_token: str) -> str:
             expires_at=expires_at,
         )
     )
-    db.commit()
+    await db.commit()
     return key
 
 
-def get_refresh_token(db: Session, cookie_key: str) -> str | None:
+async def get_refresh_token(db: AsyncSession, cookie_key: str) -> str | None:
     """Resolve an opaque cookie key to a live refresh token."""
     if not cookie_key:
         return None
-    _purge_expired_tokens(db)
-    row = db.query(RefreshTokenStore).filter(RefreshTokenStore.cookie_key == cookie_key).first()
+    await _purge_expired_tokens(db)
+    result = await db.execute(
+        select(RefreshTokenStore).where(RefreshTokenStore.cookie_key == cookie_key)
+    )
+    row = result.scalar_one_or_none()
     if not row:
         return None
     return row.refresh_token
 
 
-def rotate_refresh_token(db: Session, cookie_key: str, new_refresh_token: str) -> str:
+async def rotate_refresh_token(db: AsyncSession, cookie_key: str, new_refresh_token: str) -> str:
     """Rotate stored refresh token and return a new cookie key."""
-    new_key = store_refresh_token(db, new_refresh_token)
-    db.query(RefreshTokenStore).filter(RefreshTokenStore.cookie_key == cookie_key).delete(synchronize_session=False)
-    db.commit()
+    new_key = await store_refresh_token(db, new_refresh_token)
+    await db.execute(
+        sa_delete(RefreshTokenStore).where(RefreshTokenStore.cookie_key == cookie_key)
+    )
+    await db.commit()
     return new_key
 
 
-def revoke_refresh_token(db: Session, cookie_key: str) -> None:
+async def revoke_refresh_token(db: AsyncSession, cookie_key: str) -> None:
     """Revoke an opaque cookie key from the server-side refresh store."""
     if not cookie_key:
         return
-    db.query(RefreshTokenStore).filter(RefreshTokenStore.cookie_key == cookie_key).delete(synchronize_session=False)
-    db.commit()
+    await db.execute(
+        sa_delete(RefreshTokenStore).where(RefreshTokenStore.cookie_key == cookie_key)
+    )
+    await db.commit()
 
 
 def set_refresh_cookie(
@@ -161,46 +161,6 @@ def clear_csrf_cookie(
         path=cookie_path,
         max_age=0,
     )
-
-
-def call_cognito_refresh(refresh_token: str, cognito_domain: str, client_id: str) -> dict:
-    """
-    Exchange a refresh token for new tokens by calling the Cognito token endpoint.
-
-    Returns the parsed JSON response dict on success.
-    Raises ValueError if Cognito returns an error.
-    """
-    url = f"{cognito_domain}/oauth2/token"
-    data = urllib.parse.urlencode(
-        {
-            "grant_type": "refresh_token",
-            "client_id": client_id,
-            "refresh_token": refresh_token,
-        }
-    ).encode("utf-8")
-
-    req = urllib.request.Request(
-        url,
-        data=data,
-        headers={"Content-Type": "application/x-www-form-urlencoded"},
-        method="POST",
-    )
-
-    try:
-        with urllib.request.urlopen(req, timeout=10) as resp:  # noqa: S310
-            result = json.loads(resp.read().decode("utf-8"))
-    except urllib.error.HTTPError as exc:
-        body = exc.read().decode("utf-8")
-        try:
-            err = json.loads(body)
-        except Exception:
-            err = {"error": body}
-        raise ValueError(err.get("error_description") or err.get("error") or "Cognito token refresh failed") from exc
-
-    if "error" in result:
-        raise ValueError(result.get("error_description") or result.get("error") or "Cognito token refresh failed")
-
-    return result
 
 
 async def call_cognito_refresh_async(

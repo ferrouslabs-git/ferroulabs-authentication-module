@@ -2,7 +2,7 @@ from typing import List
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..database import get_db
 
@@ -31,11 +31,11 @@ async def get_tenant_users(
     role: str | None = Query(None, description="Filter by role name (e.g. account_owner, account_admin)"),
     user_status: str | None = Query(None, alias="status", description="Filter by membership status: active, removed"),
     ctx: ScopeContext = Depends(require_permission("account:read")),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
 ):
     """List users in tenant. Supports ?role= and ?status= filters."""
     ensure_scope_access(tenant_id, ctx)
-    return list_tenant_users(db, tenant_id, role=role, status_filter=user_status)
+    return await list_tenant_users(db, tenant_id, role=role, status_filter=user_status)
 
 
 @router.patch("/tenants/{tenant_id}/users/{user_id}/role", response_model=UpdateUserRoleResponse)
@@ -44,12 +44,12 @@ async def patch_tenant_user_role(
     user_id: UUID,
     payload: UpdateUserRoleRequest,
     ctx: ScopeContext = Depends(require_permission("members:manage")),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
 ):
     """Update user's tenant role (admin+)."""
     ensure_scope_access(tenant_id, ctx)
     try:
-        membership = update_user_role(
+        membership = await update_user_role(
             db,
             tenant_id,
             user_id,
@@ -63,7 +63,7 @@ async def patch_tenant_user_role(
     if not membership:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found in tenant")
 
-    log_audit_event(
+    await log_audit_event(
         "tenant_user_role_updated",
         actor_user_id=str(ctx.user_id),
         db=db,
@@ -85,19 +85,19 @@ async def delete_tenant_user(
     tenant_id: UUID,
     user_id: UUID,
     ctx: ScopeContext = Depends(require_permission("members:manage")),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
 ):
     """Soft-remove user from tenant (admin+)."""
     ensure_scope_access(tenant_id, ctx)
     try:
-        membership = remove_user_from_tenant(db, tenant_id, user_id)
+        membership = await remove_user_from_tenant(db, tenant_id, user_id)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
     if not membership:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found in tenant")
 
-    log_audit_event(
+    await log_audit_event(
         "tenant_user_removed",
         actor_user_id=str(ctx.user_id),
         db=db,
@@ -122,19 +122,19 @@ async def deactivate_tenant_user(
     tenant_id: UUID,
     user_id: UUID,
     ctx: ScopeContext = Depends(require_permission("members:manage")),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
 ):
     """Deactivate a user's membership in this tenant (admin+). Same as soft-remove."""
     ensure_scope_access(tenant_id, ctx)
     try:
-        membership = remove_user_from_tenant(db, tenant_id, user_id)
+        membership = await remove_user_from_tenant(db, tenant_id, user_id)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
     if not membership:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found in tenant")
 
-    log_audit_event(
+    await log_audit_event(
         "tenant_user_deactivated",
         actor_user_id=str(ctx.user_id),
         db=db,
@@ -155,11 +155,11 @@ async def reactivate_tenant_user(
     tenant_id: UUID,
     user_id: UUID,
     ctx: ScopeContext = Depends(require_permission("members:manage")),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
 ):
     """Reactivate a previously deactivated user's membership (admin+)."""
     ensure_scope_access(tenant_id, ctx)
-    membership = reactivate_user_in_tenant(db, tenant_id, user_id)
+    membership = await reactivate_user_in_tenant(db, tenant_id, user_id)
 
     if not membership:
         raise HTTPException(
@@ -167,7 +167,7 @@ async def reactivate_tenant_user(
             detail="No deactivated membership found for this user in tenant",
         )
 
-    log_audit_event(
+    await log_audit_event(
         "tenant_user_reactivated",
         actor_user_id=str(ctx.user_id),
         db=db,

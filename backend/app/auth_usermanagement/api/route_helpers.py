@@ -1,7 +1,7 @@
 from uuid import UUID
 
 from fastapi import HTTPException, status
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import get_settings
 from ..models.user import User
@@ -56,7 +56,7 @@ def build_user_status_response(user: User, message: str, suspended_at: str | Non
 
 
 async def create_invitation_response(
-    db: Session,
+    db: AsyncSession,
     tenant_id: UUID,
     invite_data: InvitationCreateRequest,
     current_user: User,
@@ -83,7 +83,7 @@ async def create_invitation_response(
                 detail="Cannot invite with a role that has more permissions than your own",
             )
 
-    invitation, raw_token = create_invitation(
+    invitation, raw_token = await create_invitation(
         db=db,
         tenant_id=tenant_id,
         email=invite_data.email,
@@ -114,7 +114,7 @@ async def create_invitation_response(
         tenant_name=invitation.tenant.name,
     )
 
-    log_audit_event(
+    await log_audit_event(
         "invitation_created",
         actor_user_id=str(current_user.id),
         db=db,
@@ -127,7 +127,7 @@ async def create_invitation_response(
     )
 
     if not email_result.sent:
-        log_audit_event(
+        await log_audit_event(
             "email_send_failed",
             actor_user_id=str(current_user.id),
             db=db,

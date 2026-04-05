@@ -8,6 +8,7 @@ import pytest
 
 from app.auth_usermanagement.models.membership import Membership
 from app.auth_usermanagement.models.space import Space
+from app.auth_usermanagement.models.tenant import Tenant
 from app.auth_usermanagement.services.space_service import (
     create_space,
     list_account_spaces,
@@ -17,33 +18,39 @@ from app.auth_usermanagement.services.space_service import (
 )
 
 
-# ── Tests using real SQLite session (conftest.db_session) ────────
+# ── Tests using dual_session (sync setup + async service calls) ────────
 
 
 class TestCreateSpace:
-    def test_create_space_returns_space_with_name(self, db_session):
-        space = create_space(db_session, "My Space", account_id=None, creator_user_id=uuid4())
+    @pytest.mark.asyncio
+    async def test_create_space_returns_space_with_name(self, dual_session):
+        sync_db, async_db = dual_session
+        space = await create_space(async_db, "My Space", account_id=None, creator_user_id=uuid4())
         assert space.name == "My Space"
         assert space.status == "active"
         assert space.id is not None
 
-    def test_create_space_with_account_id(self, db_session):
-        from app.auth_usermanagement.models.tenant import Tenant
-
+    @pytest.mark.asyncio
+    async def test_create_space_with_account_id(self, dual_session):
+        sync_db, async_db = dual_session
         tenant = Tenant(name="Acme")
-        db_session.add(tenant)
-        db_session.commit()
+        sync_db.add(tenant)
+        sync_db.commit()
 
-        space = create_space(db_session, "Team Space", account_id=tenant.id, creator_user_id=uuid4())
+        space = await create_space(async_db, "Team Space", account_id=tenant.id, creator_user_id=uuid4())
         assert space.account_id == tenant.id
 
-    def test_creator_gets_space_admin_membership(self, db_session):
+    @pytest.mark.asyncio
+    async def test_creator_gets_space_admin_membership(self, dual_session):
+        sync_db, async_db = dual_session
         creator = uuid4()
-        space = create_space(db_session, "S1", account_id=None, creator_user_id=creator)
+        await create_space(async_db, "S1", account_id=None, creator_user_id=creator)
+        await async_db.commit()
 
+        sync_db.expire_all()
         membership = (
-            db_session.query(Membership)
-            .filter(Membership.user_id == creator, Membership.scope_id == space.id)
+            sync_db.query(Membership)
+            .filter(Membership.user_id == creator)
             .first()
         )
         assert membership is not None
@@ -53,123 +60,151 @@ class TestCreateSpace:
 
 
 class TestListSpaces:
-    def _setup_spaces(self, db_session):
+    async def _setup_spaces(self, sync_db, async_db):
         """Create 2 spaces: user is member of space1, not space2."""
-        from app.auth_usermanagement.models.tenant import Tenant
-
         tenant = Tenant(name="Acme")
-        db_session.add(tenant)
-        db_session.commit()
+        sync_db.add(tenant)
+        sync_db.commit()
 
         user_id = uuid4()
-        space1 = create_space(db_session, "Alpha", account_id=tenant.id, creator_user_id=user_id)
-        space2 = create_space(db_session, "Beta", account_id=tenant.id, creator_user_id=uuid4())
+        space1 = await create_space(async_db, "Alpha", account_id=tenant.id, creator_user_id=user_id)
+        space2 = await create_space(async_db, "Beta", account_id=tenant.id, creator_user_id=uuid4())
+        await async_db.commit()
         return user_id, tenant.id, space1, space2
 
-    def test_list_user_spaces_returns_only_member_spaces(self, db_session):
-        user_id, _, space1, space2 = self._setup_spaces(db_session)
-        spaces = list_user_spaces(db_session, user_id)
+    @pytest.mark.asyncio
+    async def test_list_user_spaces_returns_only_member_spaces(self, dual_session):
+        sync_db, async_db = dual_session
+        user_id, _, space1, space2 = await self._setup_spaces(sync_db, async_db)
+        spaces = await list_user_spaces(async_db, user_id)
 
         ids = [s.id for s in spaces]
         assert space1.id in ids
         assert space2.id not in ids
 
-    def test_list_account_spaces_returns_all_account_spaces(self, db_session):
-        _, account_id, space1, space2 = self._setup_spaces(db_session)
-        spaces = list_account_spaces(db_session, account_id)
+    @pytest.mark.asyncio
+    async def test_list_account_spaces_returns_all_account_spaces(self, dual_session):
+        sync_db, async_db = dual_session
+        _, account_id, space1, space2 = await self._setup_spaces(sync_db, async_db)
+        spaces = await list_account_spaces(async_db, account_id)
 
         ids = [s.id for s in spaces]
         assert space1.id in ids
         assert space2.id in ids
 
-    def test_list_account_spaces_excludes_other_account(self, db_session):
-        from app.auth_usermanagement.models.tenant import Tenant
-
+    @pytest.mark.asyncio
+    async def test_list_account_spaces_excludes_other_account(self, dual_session):
+        sync_db, async_db = dual_session
         t1 = Tenant(name="T1")
         t2 = Tenant(name="T2")
-        db_session.add_all([t1, t2])
-        db_session.commit()
+        sync_db.add_all([t1, t2])
+        sync_db.commit()
 
-        create_space(db_session, "S-T1", account_id=t1.id, creator_user_id=uuid4())
-        create_space(db_session, "S-T2", account_id=t2.id, creator_user_id=uuid4())
+        await create_space(async_db, "S-T1", account_id=t1.id, creator_user_id=uuid4())
+        await create_space(async_db, "S-T2", account_id=t2.id, creator_user_id=uuid4())
+        await async_db.commit()
 
-        spaces = list_account_spaces(db_session, t1.id)
+        spaces = await list_account_spaces(async_db, t1.id)
         assert all(s.account_id == t1.id for s in spaces)
         assert len(spaces) == 1
 
 
 class TestSuspendUnsuspend:
-    def test_suspend_space(self, db_session):
-        space = create_space(db_session, "S", account_id=None, creator_user_id=uuid4())
-        suspended = suspend_space(db_session, space.id)
+    @pytest.mark.asyncio
+    async def test_suspend_space(self, dual_session):
+        sync_db, async_db = dual_session
+        space = await create_space(async_db, "S", account_id=None, creator_user_id=uuid4())
+        suspended = await suspend_space(async_db, space.id)
 
         assert suspended.status == "suspended"
         assert suspended.suspended_at is not None
 
-    def test_suspend_already_suspended_raises(self, db_session):
-        space = create_space(db_session, "S", account_id=None, creator_user_id=uuid4())
-        suspend_space(db_session, space.id)
+    @pytest.mark.asyncio
+    async def test_suspend_already_suspended_raises(self, dual_session):
+        sync_db, async_db = dual_session
+        space = await create_space(async_db, "S", account_id=None, creator_user_id=uuid4())
+        await suspend_space(async_db, space.id)
 
         with pytest.raises(ValueError, match="already suspended"):
-            suspend_space(db_session, space.id)
+            await suspend_space(async_db, space.id)
 
-    def test_unsuspend_space(self, db_session):
-        space = create_space(db_session, "S", account_id=None, creator_user_id=uuid4())
-        suspend_space(db_session, space.id)
-        active = unsuspend_space(db_session, space.id)
+    @pytest.mark.asyncio
+    async def test_unsuspend_space(self, dual_session):
+        sync_db, async_db = dual_session
+        space = await create_space(async_db, "S", account_id=None, creator_user_id=uuid4())
+        await suspend_space(async_db, space.id)
+        active = await unsuspend_space(async_db, space.id)
 
         assert active.status == "active"
         assert active.suspended_at is None
 
-    def test_unsuspend_active_space_raises(self, db_session):
-        space = create_space(db_session, "S", account_id=None, creator_user_id=uuid4())
+    @pytest.mark.asyncio
+    async def test_unsuspend_active_space_raises(self, dual_session):
+        sync_db, async_db = dual_session
+        space = await create_space(async_db, "S", account_id=None, creator_user_id=uuid4())
 
         with pytest.raises(ValueError, match="not suspended"):
-            unsuspend_space(db_session, space.id)
+            await unsuspend_space(async_db, space.id)
 
-    def test_suspend_nonexistent_raises(self, db_session):
+    @pytest.mark.asyncio
+    async def test_suspend_nonexistent_raises(self, dual_session):
+        sync_db, async_db = dual_session
         with pytest.raises(ValueError, match="not found"):
-            suspend_space(db_session, uuid4())
+            await suspend_space(async_db, uuid4())
 
-    def test_unsuspend_nonexistent_raises(self, db_session):
+    @pytest.mark.asyncio
+    async def test_unsuspend_nonexistent_raises(self, dual_session):
+        sync_db, async_db = dual_session
         with pytest.raises(ValueError, match="not found"):
-            unsuspend_space(db_session, uuid4())
+            await unsuspend_space(async_db, uuid4())
 
 
 class TestSpaceEdgeCases:
-    def test_create_space_without_account_id(self, db_session):
+    @pytest.mark.asyncio
+    async def test_create_space_without_account_id(self, dual_session):
         """Standalone space (no parent account) works fine."""
-        space = create_space(db_session, "Standalone", account_id=None, creator_user_id=uuid4())
+        sync_db, async_db = dual_session
+        space = await create_space(async_db, "Standalone", account_id=None, creator_user_id=uuid4())
         assert space.account_id is None
         assert space.status == "active"
 
-    def test_list_user_spaces_empty_for_no_memberships(self, db_session):
-        spaces = list_user_spaces(db_session, uuid4())
+    @pytest.mark.asyncio
+    async def test_list_user_spaces_empty_for_no_memberships(self, dual_session):
+        sync_db, async_db = dual_session
+        spaces = await list_user_spaces(async_db, uuid4())
         assert spaces == []
 
-    def test_list_account_spaces_empty_for_unknown_account(self, db_session):
-        spaces = list_account_spaces(db_session, uuid4())
+    @pytest.mark.asyncio
+    async def test_list_account_spaces_empty_for_unknown_account(self, dual_session):
+        sync_db, async_db = dual_session
+        spaces = await list_account_spaces(async_db, uuid4())
         assert spaces == []
 
-    def test_list_user_spaces_excludes_removed_membership(self, db_session):
+    @pytest.mark.asyncio
+    async def test_list_user_spaces_excludes_removed_membership(self, dual_session):
+        sync_db, async_db = dual_session
         creator = uuid4()
-        space = create_space(db_session, "S", account_id=None, creator_user_id=creator)
+        await create_space(async_db, "S", account_id=None, creator_user_id=creator)
+        await async_db.commit()
 
-        # Remove the membership
-        m = db_session.query(Membership).filter(
-            Membership.user_id == creator, Membership.scope_id == space.id
+        # Remove the membership via sync
+        sync_db.expire_all()
+        m = sync_db.query(Membership).filter(
+            Membership.user_id == creator
         ).first()
         m.status = "removed"
-        db_session.commit()
+        sync_db.commit()
 
-        spaces = list_user_spaces(db_session, creator)
+        spaces = await list_user_spaces(async_db, creator)
         assert spaces == []
 
-    def test_suspend_then_unsuspend_restores_state(self, db_session):
+    @pytest.mark.asyncio
+    async def test_suspend_then_unsuspend_restores_state(self, dual_session):
         """Full lifecycle: active → suspended → active."""
-        space = create_space(db_session, "SLC", account_id=None, creator_user_id=uuid4())
-        suspend_space(db_session, space.id)
-        restored = unsuspend_space(db_session, space.id)
+        sync_db, async_db = dual_session
+        space = await create_space(async_db, "SLC", account_id=None, creator_user_id=uuid4())
+        await suspend_space(async_db, space.id)
+        restored = await unsuspend_space(async_db, space.id)
 
         assert restored.status == "active"
         assert restored.suspended_at is None

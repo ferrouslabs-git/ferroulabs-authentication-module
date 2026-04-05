@@ -4,14 +4,12 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
 
 from app.database import Base, get_db
 from app.main import app
 from app.auth_usermanagement.models.user import User
 from app.auth_usermanagement.security import dependencies as security_dependencies
+from tests.async_test_utils import make_test_db, make_async_app
 
 
 class _FakeSettings:
@@ -24,18 +22,11 @@ class _FakeSettings:
 
 
 def _make_db():
-    engine = create_engine(
-        "sqlite://",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
-    Base.metadata.create_all(engine)
-    SessionLocal = sessionmaker(bind=engine)
-    return engine, SessionLocal
+    return make_test_db()
 
 
-def _seed_user(SessionLocal):
-    session = SessionLocal()
+def _seed_user(SyncSession):
+    session = SyncSession()
     user = User(
         cognito_sub="cookie-test-sub",
         email="cookie-test@example.com",
@@ -50,34 +41,28 @@ def _seed_user(SessionLocal):
 
 @pytest.fixture(autouse=True)
 def _override_db_dependency():
-    engine, SessionLocal = _make_db()
+    sync_engine, SyncSession, async_engine, AsyncSessionLocal = _make_db()
 
-    def _override_get_db():
-        db = SessionLocal()
-        try:
-            yield db
-        finally:
-            db.close()
+    async def _override_get_db():
+        async with AsyncSessionLocal() as session:
+            yield session
 
     app.dependency_overrides[get_db] = _override_get_db
     try:
         yield
     finally:
         app.dependency_overrides.pop(get_db, None)
-        Base.metadata.drop_all(engine)
+        Base.metadata.drop_all(sync_engine)
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _client_with_auth(monkeypatch, SessionLocal, user_sub):
-    def _override_get_db():
-        db = SessionLocal()
-        try:
-            yield db
-        finally:
-            db.close()
+def _client_with_auth(monkeypatch, AsyncSessionLocal, user_sub):
+    async def _override_get_db():
+        async with AsyncSessionLocal() as session:
+            yield session
 
     monkeypatch.setattr(
         security_dependencies,
@@ -93,11 +78,11 @@ def _client_with_auth(monkeypatch, SessionLocal, user_sub):
 # ---------------------------------------------------------------------------
 
 def test_store_refresh_sets_httponly_cookie(monkeypatch):
-    _, SessionLocal = _make_db()
-    user_sub = _seed_user(SessionLocal)
+    _, SyncSession, async_engine, AsyncSessionLocal = _make_db()
+    user_sub = _seed_user(SyncSession)
 
     try:
-        client = _client_with_auth(monkeypatch, SessionLocal, user_sub)
+        client = _client_with_auth(monkeypatch, AsyncSessionLocal, user_sub)
         with patch("app.auth_usermanagement.api.store_refresh_token", return_value="opaque-key-123"), \
              patch("app.auth_usermanagement.api.generate_csrf_token", return_value="csrf-token-abc"):
             resp = client.post(
@@ -121,7 +106,7 @@ def test_store_refresh_sets_httponly_cookie(monkeypatch):
 
 
 def test_store_refresh_requires_auth():
-    _, SessionLocal = _make_db()
+    _, SyncSession, async_engine, AsyncSessionLocal = _make_db()
 
     try:
         with TestClient(app) as client:

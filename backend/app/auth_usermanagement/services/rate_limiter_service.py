@@ -8,21 +8,22 @@ from collections import defaultdict, deque
 from datetime import datetime, timedelta, UTC
 from typing import Optional
 
-from sqlalchemy.orm import Session
+from sqlalchemy import select, delete as sa_delete, func
+from sqlalchemy.ext.asyncio import AsyncSession
 
 
 class RateLimiter(ABC):
     """Abstract base for rate limiter implementations."""
 
     @abstractmethod
-    def is_rate_limited(self, key: str, limit: int, window_seconds: int) -> bool:
+    async def is_rate_limited(self, key: str, limit: int, window_seconds: int) -> bool:
         """
         Return True if the key has exceeded the rate limit.
         """
         pass
 
     @abstractmethod
-    def close(self) -> None:
+    async def close(self) -> None:
         """Clean up resources."""
         pass
 
@@ -36,7 +37,7 @@ class InMemoryRateLimiter(RateLimiter):
     def __init__(self):
         self.hits = defaultdict(deque)
 
-    def is_rate_limited(self, key: str, limit: int, window_seconds: int) -> bool:
+    async def is_rate_limited(self, key: str, limit: int, window_seconds: int) -> bool:
         """Check if key has exceeded the rate limit."""
         window = timedelta(seconds=window_seconds)
         now = datetime.now(UTC).replace(tzinfo=None)
@@ -54,7 +55,7 @@ class InMemoryRateLimiter(RateLimiter):
         q.append(now)
         return False
 
-    def close(self) -> None:
+    async def close(self) -> None:
         """No-op for in-memory limiter."""
         pass
 
@@ -67,34 +68,36 @@ class PostgresRateLimiter(RateLimiter):
 
     def __init__(self, db_factory):
         """
-        Initialize with a database session factory.
+        Initialize with an async database session factory.
 
         Args:
-            db_factory: Callable that returns a SQLAlchemy Session
+            db_factory: Async callable that returns an AsyncSession context manager
         """
         self.db_factory = db_factory
 
-    def is_rate_limited(self, key: str, limit: int, window_seconds: int) -> bool:
+    async def is_rate_limited(self, key: str, limit: int, window_seconds: int) -> bool:
         """Check if key has exceeded the rate limit using PostgreSQL."""
         from ..models.rate_limit_hit import RateLimitHit
 
         try:
-            db = self.db_factory()
-            try:
+            async with self.db_factory() as db:
                 window = timedelta(seconds=window_seconds)
                 now = datetime.now(UTC).replace(tzinfo=None)
                 window_start = now - window
 
                 # Clean up stale records
-                db.query(RateLimitHit).filter(RateLimitHit.hit_at < window_start).delete(
-                    synchronize_session=False
+                await db.execute(
+                    sa_delete(RateLimitHit).where(RateLimitHit.hit_at < window_start)
                 )
 
                 # Count recent hits
-                hit_count = db.query(RateLimitHit).filter(
-                    RateLimitHit.key == key,
-                    RateLimitHit.hit_at >= window_start,
-                ).count()
+                result = await db.execute(
+                    select(func.count()).select_from(RateLimitHit).where(
+                        RateLimitHit.key == key,
+                        RateLimitHit.hit_at >= window_start,
+                    )
+                )
+                hit_count = result.scalar()
 
                 # Check if limit exceeded
                 if hit_count >= limit:
@@ -103,15 +106,13 @@ class PostgresRateLimiter(RateLimiter):
                 # Record this hit
                 new_hit = RateLimitHit(key=key, hit_at=now)
                 db.add(new_hit)
-                db.commit()
+                await db.commit()
                 return False
-            finally:
-                db.close()
         except Exception:
             # On DB error, fail open (allow request) rather than blocking all traffic
             return False
 
-    def close(self) -> None:
+    async def close(self) -> None:
         """No-op for PostgreSQL limiter."""
         pass
 
@@ -121,7 +122,7 @@ def create_rate_limiter(db_factory: Optional[callable] = None) -> RateLimiter:
     Factory function to create the appropriate rate limiter.
 
     Args:
-        db_factory: Optional callable that returns a SQLAlchemy Session.
+        db_factory: Optional async callable that returns an AsyncSession context manager.
                     If provided, returns PostgresRateLimiter.
                     If not provided, returns InMemoryRateLimiter.
 

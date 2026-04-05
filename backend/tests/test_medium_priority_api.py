@@ -17,9 +17,6 @@ from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
 
 from app.auth_usermanagement.models.audit_event import AuditEvent
 from app.auth_usermanagement.models.invitation import Invitation
@@ -30,26 +27,20 @@ from app.auth_usermanagement.models.user import User
 from app.auth_usermanagement.security import dependencies as security_dependencies
 from app.database import Base, get_db
 from app.main import app
+from tests.async_test_utils import make_test_db, make_async_app
 
 
 def _make_db():
-    engine = create_engine(
-        "sqlite://",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
-    Base.metadata.create_all(engine)
-    SessionLocal = sessionmaker(bind=engine)
-    return engine, SessionLocal
+    return make_test_db()
 
 
 def _utc_now():
     return datetime.now(UTC).replace(tzinfo=None)
 
 
-def _seed(SessionLocal):
+def _seed(SyncSession):
     """Seed users, tenant, memberships, spaces, audit events."""
-    session = SessionLocal()
+    session = SyncSession()
 
     admin = User(cognito_sub="admin-sub", email="admin@example.com", name="Admin", is_platform_admin=True)
     owner = User(cognito_sub="owner-sub", email="owner@example.com", name="Owner", is_platform_admin=False)
@@ -115,13 +106,10 @@ def _seed(SessionLocal):
     return ids
 
 
-def _client(monkeypatch, SessionLocal, user_sub):
-    def _override_get_db():
-        db = SessionLocal()
-        try:
-            yield db
-        finally:
-            db.close()
+def _client(monkeypatch, AsyncSessionLocal, user_sub):
+    async def _override_get_db():
+        async with AsyncSessionLocal() as session:
+            yield session
 
     monkeypatch.setattr(
         security_dependencies,
@@ -145,23 +133,23 @@ def _scoped_headers(tenant_id: str):
 
 class TestQueryAuditEvents:
     def test_admin_can_query_all_audit_events(self, monkeypatch):
-        engine, SL = _make_db()
-        ids = _seed(SL)
+        sync_engine, SyncSession, async_engine, AsyncSessionLocal = _make_db()
+        ids = _seed(SyncSession)
         try:
-            with _client(monkeypatch, SL, ids["admin_sub"]) as c:
+            with _client(monkeypatch, AsyncSessionLocal, ids["admin_sub"]) as c:
                 r = c.get("/auth/platform/audit-events", headers=_headers())
                 assert r.status_code == 200
                 data = r.json()
                 assert len(data) >= 3
         finally:
             app.dependency_overrides.clear()
-            Base.metadata.drop_all(engine)
+            Base.metadata.drop_all(sync_engine)
 
     def test_admin_can_filter_by_action(self, monkeypatch):
-        engine, SL = _make_db()
-        ids = _seed(SL)
+        sync_engine, SyncSession, async_engine, AsyncSessionLocal = _make_db()
+        ids = _seed(SyncSession)
         try:
-            with _client(monkeypatch, SL, ids["admin_sub"]) as c:
+            with _client(monkeypatch, AsyncSessionLocal, ids["admin_sub"]) as c:
                 r = c.get("/auth/platform/audit-events?action=tenant_created", headers=_headers())
                 assert r.status_code == 200
                 data = r.json()
@@ -169,13 +157,13 @@ class TestQueryAuditEvents:
                 assert all(e["action"] == "tenant_created" for e in data)
         finally:
             app.dependency_overrides.clear()
-            Base.metadata.drop_all(engine)
+            Base.metadata.drop_all(sync_engine)
 
     def test_admin_can_filter_by_actor(self, monkeypatch):
-        engine, SL = _make_db()
-        ids = _seed(SL)
+        sync_engine, SyncSession, async_engine, AsyncSessionLocal = _make_db()
+        ids = _seed(SyncSession)
         try:
-            with _client(monkeypatch, SL, ids["admin_sub"]) as c:
+            with _client(monkeypatch, AsyncSessionLocal, ids["admin_sub"]) as c:
                 r = c.get(f"/auth/platform/audit-events?actor_user_id={ids['owner_id']}", headers=_headers())
                 assert r.status_code == 200
                 data = r.json()
@@ -183,30 +171,30 @@ class TestQueryAuditEvents:
                 assert all(e["actor_user_id"] == ids["owner_id"] for e in data)
         finally:
             app.dependency_overrides.clear()
-            Base.metadata.drop_all(engine)
+            Base.metadata.drop_all(sync_engine)
 
     def test_admin_can_paginate(self, monkeypatch):
-        engine, SL = _make_db()
-        ids = _seed(SL)
+        sync_engine, SyncSession, async_engine, AsyncSessionLocal = _make_db()
+        ids = _seed(SyncSession)
         try:
-            with _client(monkeypatch, SL, ids["admin_sub"]) as c:
+            with _client(monkeypatch, AsyncSessionLocal, ids["admin_sub"]) as c:
                 r = c.get("/auth/platform/audit-events?limit=1&offset=0", headers=_headers())
                 assert r.status_code == 200
                 assert len(r.json()) == 1
         finally:
             app.dependency_overrides.clear()
-            Base.metadata.drop_all(engine)
+            Base.metadata.drop_all(sync_engine)
 
     def test_non_admin_blocked(self, monkeypatch):
-        engine, SL = _make_db()
-        ids = _seed(SL)
+        sync_engine, SyncSession, async_engine, AsyncSessionLocal = _make_db()
+        ids = _seed(SyncSession)
         try:
-            with _client(monkeypatch, SL, ids["owner_sub"]) as c:
+            with _client(monkeypatch, AsyncSessionLocal, ids["owner_sub"]) as c:
                 r = c.get("/auth/platform/audit-events", headers=_headers())
                 assert r.status_code == 403
         finally:
             app.dependency_overrides.clear()
-            Base.metadata.drop_all(engine)
+            Base.metadata.drop_all(sync_engine)
 
 
 # ── #6: GET /spaces/{space_id} ──────────────────────────────────
@@ -214,10 +202,10 @@ class TestQueryAuditEvents:
 
 class TestGetSpaceDetail:
     def test_tenant_member_can_get_space(self, monkeypatch):
-        engine, SL = _make_db()
-        ids = _seed(SL)
+        sync_engine, SyncSession, async_engine, AsyncSessionLocal = _make_db()
+        ids = _seed(SyncSession)
         try:
-            with _client(monkeypatch, SL, ids["owner_sub"]) as c:
+            with _client(monkeypatch, AsyncSessionLocal, ids["owner_sub"]) as c:
                 r = c.get(f"/auth/spaces/{ids['space_id']}", headers=_scoped_headers(ids["tenant_id"]))
                 assert r.status_code == 200
                 data = r.json()
@@ -225,18 +213,18 @@ class TestGetSpaceDetail:
                 assert data["status"] == "active"
         finally:
             app.dependency_overrides.clear()
-            Base.metadata.drop_all(engine)
+            Base.metadata.drop_all(sync_engine)
 
     def test_nonexistent_space_returns_404(self, monkeypatch):
-        engine, SL = _make_db()
-        ids = _seed(SL)
+        sync_engine, SyncSession, async_engine, AsyncSessionLocal = _make_db()
+        ids = _seed(SyncSession)
         try:
-            with _client(monkeypatch, SL, ids["owner_sub"]) as c:
+            with _client(monkeypatch, AsyncSessionLocal, ids["owner_sub"]) as c:
                 r = c.get(f"/auth/spaces/{uuid4()}", headers=_scoped_headers(ids["tenant_id"]))
                 assert r.status_code == 404
         finally:
             app.dependency_overrides.clear()
-            Base.metadata.drop_all(engine)
+            Base.metadata.drop_all(sync_engine)
 
 
 # ── #7: PATCH /spaces/{space_id} ────────────────────────────────
@@ -244,10 +232,10 @@ class TestGetSpaceDetail:
 
 class TestUpdateSpace:
     def test_owner_can_update_space_name(self, monkeypatch):
-        engine, SL = _make_db()
-        ids = _seed(SL)
+        sync_engine, SyncSession, async_engine, AsyncSessionLocal = _make_db()
+        ids = _seed(SyncSession)
         try:
-            with _client(monkeypatch, SL, ids["owner_sub"]) as c:
+            with _client(monkeypatch, AsyncSessionLocal, ids["owner_sub"]) as c:
                 r = c.patch(
                     f"/auth/spaces/{ids['space_id']}",
                     json={"name": "Renamed Space"},
@@ -257,13 +245,13 @@ class TestUpdateSpace:
                 assert r.json()["name"] == "Renamed Space"
         finally:
             app.dependency_overrides.clear()
-            Base.metadata.drop_all(engine)
+            Base.metadata.drop_all(sync_engine)
 
     def test_update_nonexistent_space_returns_404(self, monkeypatch):
-        engine, SL = _make_db()
-        ids = _seed(SL)
+        sync_engine, SyncSession, async_engine, AsyncSessionLocal = _make_db()
+        ids = _seed(SyncSession)
         try:
-            with _client(monkeypatch, SL, ids["owner_sub"]) as c:
+            with _client(monkeypatch, AsyncSessionLocal, ids["owner_sub"]) as c:
                 r = c.patch(
                     f"/auth/spaces/{uuid4()}",
                     json={"name": "Ghost"},
@@ -272,13 +260,13 @@ class TestUpdateSpace:
                 assert r.status_code == 404
         finally:
             app.dependency_overrides.clear()
-            Base.metadata.drop_all(engine)
+            Base.metadata.drop_all(sync_engine)
 
     def test_update_with_no_fields_returns_400(self, monkeypatch):
-        engine, SL = _make_db()
-        ids = _seed(SL)
+        sync_engine, SyncSession, async_engine, AsyncSessionLocal = _make_db()
+        ids = _seed(SyncSession)
         try:
-            with _client(monkeypatch, SL, ids["owner_sub"]) as c:
+            with _client(monkeypatch, AsyncSessionLocal, ids["owner_sub"]) as c:
                 r = c.patch(
                     f"/auth/spaces/{ids['space_id']}",
                     json={},
@@ -287,7 +275,7 @@ class TestUpdateSpace:
                 assert r.status_code == 400
         finally:
             app.dependency_overrides.clear()
-            Base.metadata.drop_all(engine)
+            Base.metadata.drop_all(sync_engine)
 
 
 # ── #8: POST /tenants/{tenant_id}/invitations/bulk ──────────────
@@ -295,10 +283,10 @@ class TestUpdateSpace:
 
 class TestBulkInvite:
     def test_owner_can_bulk_invite(self, monkeypatch):
-        engine, SL = _make_db()
-        ids = _seed(SL)
+        sync_engine, SyncSession, async_engine, AsyncSessionLocal = _make_db()
+        ids = _seed(SyncSession)
         try:
-            with _client(monkeypatch, SL, ids["owner_sub"]) as c:
+            with _client(monkeypatch, AsyncSessionLocal, ids["owner_sub"]) as c:
                 r = c.post(
                     f"/auth/tenants/{ids['tenant_id']}/invitations/bulk",
                     json={"invitations": [
@@ -316,13 +304,13 @@ class TestBulkInvite:
                 assert all(res["success"] for res in data["results"])
         finally:
             app.dependency_overrides.clear()
-            Base.metadata.drop_all(engine)
+            Base.metadata.drop_all(sync_engine)
 
     def test_admin_can_bulk_invite(self, monkeypatch):
-        engine, SL = _make_db()
-        ids = _seed(SL)
+        sync_engine, SyncSession, async_engine, AsyncSessionLocal = _make_db()
+        ids = _seed(SyncSession)
         try:
-            with _client(monkeypatch, SL, ids["admin_sub"]) as c:
+            with _client(monkeypatch, AsyncSessionLocal, ids["admin_sub"]) as c:
                 r = c.post(
                     f"/auth/tenants/{ids['tenant_id']}/invitations/bulk",
                     json={"invitations": [{"email": "c@example.com"}]},
@@ -332,13 +320,13 @@ class TestBulkInvite:
                 assert r.json()["succeeded"] == 1
         finally:
             app.dependency_overrides.clear()
-            Base.metadata.drop_all(engine)
+            Base.metadata.drop_all(sync_engine)
 
     def test_outsider_blocked_from_bulk_invite(self, monkeypatch):
-        engine, SL = _make_db()
-        ids = _seed(SL)
+        sync_engine, SyncSession, async_engine, AsyncSessionLocal = _make_db()
+        ids = _seed(SyncSession)
         try:
-            with _client(monkeypatch, SL, ids["outsider_sub"]) as c:
+            with _client(monkeypatch, AsyncSessionLocal, ids["outsider_sub"]) as c:
                 r = c.post(
                     f"/auth/tenants/{ids['tenant_id']}/invitations/bulk",
                     json={"invitations": [{"email": "x@example.com"}]},
@@ -347,13 +335,13 @@ class TestBulkInvite:
                 assert r.status_code == 403
         finally:
             app.dependency_overrides.clear()
-            Base.metadata.drop_all(engine)
+            Base.metadata.drop_all(sync_engine)
 
     def test_empty_list_rejected(self, monkeypatch):
-        engine, SL = _make_db()
-        ids = _seed(SL)
+        sync_engine, SyncSession, async_engine, AsyncSessionLocal = _make_db()
+        ids = _seed(SyncSession)
         try:
-            with _client(monkeypatch, SL, ids["owner_sub"]) as c:
+            with _client(monkeypatch, AsyncSessionLocal, ids["owner_sub"]) as c:
                 r = c.post(
                     f"/auth/tenants/{ids['tenant_id']}/invitations/bulk",
                     json={"invitations": []},
@@ -362,13 +350,13 @@ class TestBulkInvite:
                 assert r.status_code == 422  # validation error
         finally:
             app.dependency_overrides.clear()
-            Base.metadata.drop_all(engine)
+            Base.metadata.drop_all(sync_engine)
 
     def test_bulk_invite_with_target_role_name(self, monkeypatch):
-        engine, SL = _make_db()
-        ids = _seed(SL)
+        sync_engine, SyncSession, async_engine, AsyncSessionLocal = _make_db()
+        ids = _seed(SyncSession)
         try:
-            with _client(monkeypatch, SL, ids["owner_sub"]) as c:
+            with _client(monkeypatch, AsyncSessionLocal, ids["owner_sub"]) as c:
                 r = c.post(
                     f"/auth/tenants/{ids['tenant_id']}/invitations/bulk",
                     json={"invitations": [
@@ -380,7 +368,7 @@ class TestBulkInvite:
                 assert r.json()["succeeded"] == 1
         finally:
             app.dependency_overrides.clear()
-            Base.metadata.drop_all(engine)
+            Base.metadata.drop_all(sync_engine)
 
 
 # ── #9: GET /me/memberships ─────────────────────────────────────
@@ -388,10 +376,10 @@ class TestBulkInvite:
 
 class TestGetMyMemberships:
     def test_owner_sees_account_membership(self, monkeypatch):
-        engine, SL = _make_db()
-        ids = _seed(SL)
+        sync_engine, SyncSession, async_engine, AsyncSessionLocal = _make_db()
+        ids = _seed(SyncSession)
         try:
-            with _client(monkeypatch, SL, ids["owner_sub"]) as c:
+            with _client(monkeypatch, AsyncSessionLocal, ids["owner_sub"]) as c:
                 r = c.get("/auth/me/memberships", headers=_headers())
                 assert r.status_code == 200
                 data = r.json()
@@ -401,13 +389,13 @@ class TestGetMyMemberships:
                 assert "account" in scope_types
         finally:
             app.dependency_overrides.clear()
-            Base.metadata.drop_all(engine)
+            Base.metadata.drop_all(sync_engine)
 
     def test_member_sees_memberships(self, monkeypatch):
-        engine, SL = _make_db()
-        ids = _seed(SL)
+        sync_engine, SyncSession, async_engine, AsyncSessionLocal = _make_db()
+        ids = _seed(SyncSession)
         try:
-            with _client(monkeypatch, SL, ids["member_sub"]) as c:
+            with _client(monkeypatch, AsyncSessionLocal, ids["member_sub"]) as c:
                 r = c.get("/auth/me/memberships", headers=_headers())
                 assert r.status_code == 200
                 data = r.json()
@@ -415,32 +403,32 @@ class TestGetMyMemberships:
                 assert data[0]["role"] == "account_member"
         finally:
             app.dependency_overrides.clear()
-            Base.metadata.drop_all(engine)
+            Base.metadata.drop_all(sync_engine)
 
     def test_outsider_sees_empty_memberships(self, monkeypatch):
-        engine, SL = _make_db()
-        ids = _seed(SL)
+        sync_engine, SyncSession, async_engine, AsyncSessionLocal = _make_db()
+        ids = _seed(SyncSession)
         try:
-            with _client(monkeypatch, SL, ids["outsider_sub"]) as c:
+            with _client(monkeypatch, AsyncSessionLocal, ids["outsider_sub"]) as c:
                 r = c.get("/auth/me/memberships", headers=_headers())
                 assert r.status_code == 200
                 assert len(r.json()) == 0
         finally:
             app.dependency_overrides.clear()
-            Base.metadata.drop_all(engine)
+            Base.metadata.drop_all(sync_engine)
 
     def test_membership_includes_tenant_name(self, monkeypatch):
-        engine, SL = _make_db()
-        ids = _seed(SL)
+        sync_engine, SyncSession, async_engine, AsyncSessionLocal = _make_db()
+        ids = _seed(SyncSession)
         try:
-            with _client(monkeypatch, SL, ids["owner_sub"]) as c:
+            with _client(monkeypatch, AsyncSessionLocal, ids["owner_sub"]) as c:
                 r = c.get("/auth/me/memberships", headers=_headers())
                 account_memberships = [m for m in r.json() if m["scope_type"] == "account"]
                 assert len(account_memberships) >= 1
                 assert account_memberships[0]["tenant_name"] == "Acme"
         finally:
             app.dependency_overrides.clear()
-            Base.metadata.drop_all(engine)
+            Base.metadata.drop_all(sync_engine)
 
     def test_unauthenticated_returns_401(self):
         with TestClient(app) as c:
@@ -453,10 +441,10 @@ class TestGetMyMemberships:
 
 class TestPlatformCleanup:
     def test_admin_can_trigger_cleanup(self, monkeypatch):
-        engine, SL = _make_db()
-        ids = _seed(SL)
+        sync_engine, SyncSession, async_engine, AsyncSessionLocal = _make_db()
+        ids = _seed(SyncSession)
         try:
-            with _client(monkeypatch, SL, ids["admin_sub"]) as c:
+            with _client(monkeypatch, AsyncSessionLocal, ids["admin_sub"]) as c:
                 r = c.post("/auth/platform/cleanup", headers=_headers())
                 assert r.status_code == 200
                 data = r.json()
@@ -465,18 +453,18 @@ class TestPlatformCleanup:
                 assert "invitations" in data["removed"]
         finally:
             app.dependency_overrides.clear()
-            Base.metadata.drop_all(engine)
+            Base.metadata.drop_all(sync_engine)
 
     def test_non_admin_blocked(self, monkeypatch):
-        engine, SL = _make_db()
-        ids = _seed(SL)
+        sync_engine, SyncSession, async_engine, AsyncSessionLocal = _make_db()
+        ids = _seed(SyncSession)
         try:
-            with _client(monkeypatch, SL, ids["owner_sub"]) as c:
+            with _client(monkeypatch, AsyncSessionLocal, ids["owner_sub"]) as c:
                 r = c.post("/auth/platform/cleanup", headers=_headers())
                 assert r.status_code == 403
         finally:
             app.dependency_overrides.clear()
-            Base.metadata.drop_all(engine)
+            Base.metadata.drop_all(sync_engine)
 
 
 # ── #11: DELETE /platform/tenants/{tenant_id} ────────────────────
@@ -484,10 +472,10 @@ class TestPlatformCleanup:
 
 class TestDeleteTenant:
     def test_admin_can_delete_tenant(self, monkeypatch):
-        engine, SL = _make_db()
-        ids = _seed(SL)
+        sync_engine, SyncSession, async_engine, AsyncSessionLocal = _make_db()
+        ids = _seed(SyncSession)
         try:
-            with _client(monkeypatch, SL, ids["admin_sub"]) as c:
+            with _client(monkeypatch, AsyncSessionLocal, ids["admin_sub"]) as c:
                 r = c.delete(f"/auth/platform/tenants/{ids['tenant_id']}", headers=_headers())
                 assert r.status_code == 200
                 data = r.json()
@@ -499,26 +487,26 @@ class TestDeleteTenant:
                 assert r2.status_code == 404
         finally:
             app.dependency_overrides.clear()
-            Base.metadata.drop_all(engine)
+            Base.metadata.drop_all(sync_engine)
 
     def test_non_admin_blocked(self, monkeypatch):
-        engine, SL = _make_db()
-        ids = _seed(SL)
+        sync_engine, SyncSession, async_engine, AsyncSessionLocal = _make_db()
+        ids = _seed(SyncSession)
         try:
-            with _client(monkeypatch, SL, ids["owner_sub"]) as c:
+            with _client(monkeypatch, AsyncSessionLocal, ids["owner_sub"]) as c:
                 r = c.delete(f"/auth/platform/tenants/{ids['tenant_id']}", headers=_headers())
                 assert r.status_code == 403
         finally:
             app.dependency_overrides.clear()
-            Base.metadata.drop_all(engine)
+            Base.metadata.drop_all(sync_engine)
 
     def test_delete_nonexistent_tenant_returns_404(self, monkeypatch):
-        engine, SL = _make_db()
-        ids = _seed(SL)
+        sync_engine, SyncSession, async_engine, AsyncSessionLocal = _make_db()
+        ids = _seed(SyncSession)
         try:
-            with _client(monkeypatch, SL, ids["admin_sub"]) as c:
+            with _client(monkeypatch, AsyncSessionLocal, ids["admin_sub"]) as c:
                 r = c.delete(f"/auth/platform/tenants/{uuid4()}", headers=_headers())
                 assert r.status_code == 404
         finally:
             app.dependency_overrides.clear()
-            Base.metadata.drop_all(engine)
+            Base.metadata.drop_all(sync_engine)

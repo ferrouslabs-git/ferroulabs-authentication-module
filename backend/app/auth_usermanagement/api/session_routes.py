@@ -2,7 +2,7 @@ from typing import Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, HTTPException, status
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..database import get_db
 
@@ -24,7 +24,7 @@ router = APIRouter()
 @router.get("/sessions", response_model=list[SessionListItemResponse])
 async def get_my_sessions(
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     include_revoked: bool = False,
     limit: int = 50,
     x_current_session_id: Optional[str] = Header(None),
@@ -42,7 +42,7 @@ async def get_my_sessions(
                 detail="Invalid X-Current-Session-ID format",
             ) from exc
 
-    sessions = list_user_sessions(
+    sessions = await list_user_sessions(
         db=db,
         user_id=current_user.id,
         include_revoked=include_revoked,
@@ -69,7 +69,7 @@ async def get_my_sessions(
 @router.delete("/sessions/all")
 async def revoke_all_sessions(
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     x_current_session_id: Optional[str] = Header(None),
 ):
     """Revoke all active sessions for current user."""
@@ -83,13 +83,13 @@ async def revoke_all_sessions(
                 detail="Invalid X-Current-Session-ID format",
             ) from exc
 
-    revoked_count = revoke_all_user_sessions(
+    revoked_count = await revoke_all_user_sessions(
         db=db,
         user_id=current_user.id,
         except_session_id=keep_session_id,
     )
 
-    log_audit_event(
+    await log_audit_event(
         "all_sessions_revoked",
         actor_user_id=str(current_user.id),
         db=db,
@@ -109,10 +109,10 @@ async def revoke_all_sessions(
 async def register_session(
     payload: SessionRegisterRequest,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
 ):
     """Create a refresh-token-backed session for current user."""
-    created = create_user_session(
+    created = await create_user_session(
         db=db,
         user_id=current_user.id,
         refresh_token=payload.refresh_token,
@@ -122,7 +122,7 @@ async def register_session(
         expires_at=payload.expires_at,
     )
 
-    log_audit_event(
+    await log_audit_event(
         "session_registered",
         actor_user_id=str(current_user.id),
         db=db,
@@ -142,10 +142,10 @@ async def rotate_session(
     session_id: UUID,
     payload: SessionRotateRequest,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
 ):
     """Rotate refresh token by revoking current session and issuing replacement."""
-    rotated = rotate_user_session(
+    rotated = await rotate_user_session(
         db=db,
         user_id=current_user.id,
         session_id=session_id,
@@ -160,7 +160,7 @@ async def rotate_session(
     if not rotated:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
 
-    log_audit_event(
+    await log_audit_event(
         "session_rotated",
         actor_user_id=str(current_user.id),
         db=db,
@@ -180,14 +180,14 @@ async def rotate_session(
 async def revoke_session(
     session_id: UUID,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
 ):
     """Revoke one active session that belongs to the current user."""
-    revoked = revoke_user_session(db, current_user.id, session_id)
+    revoked = await revoke_user_session(db, current_user.id, session_id)
     if not revoked:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
 
-    log_audit_event(
+    await log_audit_event(
         "session_revoked",
         actor_user_id=str(current_user.id),
         db=db,

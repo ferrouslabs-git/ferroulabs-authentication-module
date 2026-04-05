@@ -2,7 +2,7 @@
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..database import get_db
 
@@ -29,33 +29,33 @@ async def create_new_space(
     body: SpaceCreateRequest,
     ctx: ScopeContext = Depends(require_permission("spaces:create")),
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
 ):
     """Create a new space. account_id defaults to the current scope."""
     account_id = body.account_id or ctx.scope_id
-    space = create_space(db, body.name, account_id, current_user.id)
+    space = await create_space(db, body.name, account_id, current_user.id)
     return space
 
 
 @router.get("/spaces/my", response_model=list[SpaceResponse])
 async def list_my_spaces(
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
 ):
     """List all spaces where the current user has an active membership."""
-    return list_user_spaces(db, current_user.id)
+    return await list_user_spaces(db, current_user.id)
 
 
 @router.get("/accounts/{account_id}/spaces", response_model=list[SpaceResponse])
 async def list_spaces_in_account(
     account_id: UUID,
     ctx: ScopeContext = Depends(require_permission("account:read")),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
 ):
     """List spaces belonging to an account."""
     if account_id != ctx.scope_id and not ctx.is_super_admin:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Scope mismatch")
-    return list_account_spaces(db, account_id)
+    return await list_account_spaces(db, account_id)
 
 
 @router.post("/spaces/{space_id}/invite", response_model=InvitationCreateResponse)
@@ -64,7 +64,7 @@ async def invite_to_space(
     invite_data: InvitationCreateRequest,
     ctx: ScopeContext = Depends(require_permission("members:invite")),
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
 ):
     """Invite a user to a space with a space-layer role."""
     # Override scope fields to target this specific space
@@ -83,10 +83,10 @@ async def invite_to_space(
 async def get_space_detail(
     space_id: UUID,
     ctx: ScopeContext = Depends(require_permission("account:read")),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
 ):
     """Get details for a single space."""
-    space = get_space_by_id(db, space_id)
+    space = await get_space_by_id(db, space_id)
     if not space:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Space not found")
     return space
@@ -97,13 +97,13 @@ async def update_space_detail(
     space_id: UUID,
     payload: SpaceUpdateRequest,
     ctx: ScopeContext = Depends(require_permission("spaces:create")),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
 ):
     """Update space name. Requires spaces:create permission."""
     if payload.name is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="At least one field (name) must be provided")
     try:
-        space = update_space(db, space_id, name=payload.name)
+        space = await update_space(db, space_id, name=payload.name)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     return space
@@ -113,11 +113,11 @@ async def update_space_detail(
 async def suspend_space_endpoint(
     space_id: UUID,
     ctx: ScopeContext = Depends(require_permission("space:delete")),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
 ):
     """Suspend a space (admin+)."""
     try:
-        space = suspend_space(db, space_id)
+        space = await suspend_space(db, space_id)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     return SpaceSuspendResponse(
@@ -129,11 +129,11 @@ async def suspend_space_endpoint(
 async def unsuspend_space_endpoint(
     space_id: UUID,
     ctx: ScopeContext = Depends(require_permission("space:delete")),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
 ):
     """Unsuspend a space (admin+)."""
     try:
-        space = unsuspend_space(db, space_id)
+        space = await unsuspend_space(db, space_id)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     return SpaceSuspendResponse(

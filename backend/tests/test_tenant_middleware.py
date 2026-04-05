@@ -5,9 +5,6 @@ from types import SimpleNamespace
 from uuid import uuid4
 
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
 from starlette.requests import Request
 
 from app.database import Base, get_db
@@ -17,6 +14,7 @@ from app.auth_usermanagement.models.tenant import Tenant
 from app.auth_usermanagement.models.user import User
 from app.auth_usermanagement.security import dependencies as security_dependencies
 from app.auth_usermanagement.security.tenant_middleware import TenantContextMiddleware
+from tests.async_test_utils import make_test_db
 
 
 def _build_request(path: str, method: str = "GET", headers: list[tuple[bytes, bytes]] | None = None) -> Request:
@@ -91,15 +89,9 @@ def test_custom_auth_prefix_protects_matching_paths():
 
 
 def test_cross_tenant_access_blocked_at_api_level(monkeypatch):
-    engine = create_engine(
-        "sqlite://",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
-    SessionLocal = sessionmaker(bind=engine)
-    Base.metadata.create_all(engine)
+    sync_engine, SyncSession, async_engine, AsyncSessionLocal = make_test_db()
 
-    session = SessionLocal()
+    session = SyncSession()
     user = User(
         cognito_sub="middleware-api-sub",
         email="middleware-api@example.com",
@@ -123,12 +115,9 @@ def test_cross_tenant_access_blocked_at_api_level(monkeypatch):
     tenant_b_id = str(tenant_b.id)
     session.close()
 
-    def _override_get_db():
-        db = SessionLocal()
-        try:
-            yield db
-        finally:
-            db.close()
+    async def _override_get_db():
+        async with AsyncSessionLocal() as session:
+            yield session
 
     monkeypatch.setattr(
         security_dependencies,
@@ -148,7 +137,7 @@ def test_cross_tenant_access_blocked_at_api_level(monkeypatch):
             )
     finally:
         app.dependency_overrides.clear()
-        Base.metadata.drop_all(engine)
+        Base.metadata.drop_all(sync_engine)
 
     assert response.status_code == 403
     assert "Access denied" in response.text

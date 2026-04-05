@@ -1,7 +1,7 @@
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..database import get_db
 
@@ -37,7 +37,7 @@ async def invite_user_to_tenant(
     invite_data: InvitationCreateRequest,
     ctx: ScopeContext = Depends(require_permission("members:invite")),
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
 ):
     """Create an invitation for a user to join the current scope."""
     return await create_invitation_response(db, ctx.scope_id, invite_data, current_user, ctx)
@@ -49,7 +49,7 @@ async def invite_user_to_explicit_tenant(
     invite_data: InvitationCreateRequest,
     ctx: ScopeContext = Depends(require_permission("members:invite")),
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
 ):
     """Create an invitation using explicit tenant path parameter."""
     ensure_scope_access(tenant_id, ctx)
@@ -57,9 +57,9 @@ async def invite_user_to_explicit_tenant(
 
 
 @router.get("/invites/{token}", response_model=InvitationPreviewResponse)
-async def preview_invitation(token: str, db: Session = Depends(get_db)):
+async def preview_invitation(token: str, db: AsyncSession = Depends(get_db)):
     """Get invitation details by token for pre-accept preview."""
-    invitation = get_invitation_by_token(db, token)
+    invitation = await get_invitation_by_token(db, token)
     if not invitation:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invitation not found")
 
@@ -82,20 +82,20 @@ async def revoke_tenant_invitation(
     token: str,
     ctx: ScopeContext = Depends(require_permission("members:invite")),
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
 ):
     """Revoke a pending invitation token for a tenant (admin+)."""
     ensure_scope_access(tenant_id, ctx)
-    invitation = get_tenant_invitation_by_token(db, tenant_id, token)
+    invitation = await get_tenant_invitation_by_token(db, tenant_id, token)
     if not invitation:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invitation not found")
 
     try:
-        invitation = revoke_invitation(db, invitation)
+        invitation = await revoke_invitation(db, invitation)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
-    log_audit_event(
+    await log_audit_event(
         "invitation_revoked",
         actor_user_id=str(current_user.id),
         db=db,
@@ -118,16 +118,16 @@ async def resend_tenant_invitation(
     token: str,
     ctx: ScopeContext = Depends(require_permission("members:invite")),
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
 ):
     """Resend a pending or expired invitation with a fresh token and email."""
     ensure_scope_access(tenant_id, ctx)
-    invitation = get_tenant_invitation_by_token(db, tenant_id, token)
+    invitation = await get_tenant_invitation_by_token(db, tenant_id, token)
     if not invitation:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invitation not found")
 
     try:
-        invitation, raw_token = resend_invitation(db, invitation)
+        invitation, raw_token = await resend_invitation(db, invitation)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
@@ -139,7 +139,7 @@ async def resend_tenant_invitation(
         tenant_name=invitation.tenant.name,
     )
 
-    log_audit_event(
+    await log_audit_event(
         "invitation_resent",
         actor_user_id=str(current_user.id),
         db=db,
@@ -172,16 +172,16 @@ async def resend_invitation_by_id(
     invitation_id: UUID,
     ctx: ScopeContext = Depends(require_permission("members:invite")),
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
 ):
     """Resend a pending or expired invitation looked up by row ID (admin+)."""
     ensure_scope_access(tenant_id, ctx)
-    invitation = get_invitation_by_id(db, tenant_id, invitation_id)
+    invitation = await get_invitation_by_id(db, tenant_id, invitation_id)
     if not invitation:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invitation not found")
 
     try:
-        invitation, raw_token = resend_invitation(db, invitation)
+        invitation, raw_token = await resend_invitation(db, invitation)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
@@ -193,7 +193,7 @@ async def resend_invitation_by_id(
         tenant_name=invitation.tenant.name,
     )
 
-    log_audit_event(
+    await log_audit_event(
         "invitation_resent",
         actor_user_id=str(current_user.id),
         db=db,
@@ -224,21 +224,21 @@ async def resend_invitation_by_id(
 async def accept_invitation_token(
     payload: InvitationAcceptRequest,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
 ):
     """Accept an invitation token for the authenticated user."""
-    invitation = get_invitation_by_token(db, payload.token)
+    invitation = await get_invitation_by_token(db, payload.token)
     if not invitation:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invitation not found")
 
     try:
-        membership = accept_invitation(db, invitation, current_user)
+        membership = await accept_invitation(db, invitation, current_user)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     except PermissionError as exc:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
 
-    log_audit_event(
+    await log_audit_event(
         "invitation_accepted",
         actor_user_id=str(current_user.id),
         db=db,
