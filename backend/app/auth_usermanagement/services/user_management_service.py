@@ -3,30 +3,37 @@ Service logic for tenant user-management APIs.
 """
 from uuid import UUID
 
-from sqlalchemy.orm import Session, selectinload
+from sqlalchemy import select, func
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from ..models.membership import Membership
 from ..models.user import User
 
 
-def list_tenant_users(
-    db: Session,
+async def list_tenant_users(
+    db: AsyncSession,
     tenant_id: UUID,
     *,
     role: str | None = None,
     status_filter: str | None = None,
 ) -> list[dict]:
-    query = db.query(Membership).filter(
-        Membership.scope_type == "account",
-        Membership.scope_id == tenant_id,
+    stmt = (
+        select(Membership)
+        .options(selectinload(Membership.user))
+        .where(
+            Membership.scope_type == "account",
+            Membership.scope_id == tenant_id,
+        )
     )
     if status_filter:
-        query = query.filter(Membership.status == status_filter)
+        stmt = stmt.where(Membership.status == status_filter)
     else:
-        query = query.filter(Membership.status == "active")
+        stmt = stmt.where(Membership.status == "active")
     if role:
-        query = query.filter(Membership.role_name == role)
-    memberships = query.all()
+        stmt = stmt.where(Membership.role_name == role)
+    result = await db.execute(stmt)
+    memberships = result.scalars().all()
 
     return [
         {
@@ -42,20 +49,20 @@ def list_tenant_users(
     ]
 
 
-def list_platform_users(db: Session, *, role: str | None = None) -> list[dict]:
-    query = db.query(User).options(
-        selectinload(User.memberships)
-    ).order_by(User.email.asc())
+async def list_platform_users(db: AsyncSession, *, role: str | None = None) -> list[dict]:
+    stmt = (
+        select(User)
+        .options(selectinload(User.memberships).selectinload(Membership.tenant))
+        .order_by(User.email.asc())
+    )
     if role:
-        query = query.filter(
-            User.id.in_(
-                db.query(Membership.user_id).filter(
-                    Membership.role_name == role,
-                    Membership.status == "active",
-                )
-            )
-        )
-    users = query.all()
+        subq = select(Membership.user_id).where(
+            Membership.role_name == role,
+            Membership.status == "active",
+        ).scalar_subquery()
+        stmt = stmt.where(User.id.in_(subq))
+    result = await db.execute(stmt)
+    users = result.scalars().all()
 
     return [
         {
@@ -87,20 +94,23 @@ def list_platform_users(db: Session, *, role: str | None = None) -> list[dict]:
     ]
 
 
-def update_user_role(
-    db: Session,
+async def update_user_role(
+    db: AsyncSession,
     tenant_id: UUID,
     user_id: UUID,
     new_role: str,
     actor_role: str | None,
     actor_is_platform_admin: bool = False,
 ) -> Membership | None:
-    membership = db.query(Membership).filter(
-        Membership.scope_type == "account",
-        Membership.scope_id == tenant_id,
-        Membership.user_id == user_id,
-        Membership.status == "active",
-    ).first()
+    result = await db.execute(
+        select(Membership).where(
+            Membership.scope_type == "account",
+            Membership.scope_id == tenant_id,
+            Membership.user_id == user_id,
+            Membership.status == "active",
+        )
+    )
+    membership = result.scalar_one_or_none()
 
     if not membership:
         return None
@@ -123,28 +133,34 @@ def update_user_role(
 
     # Prevent removing the last owner / account_owner.
     if current_role in ("owner", "account_owner") and new_role not in ("owner", "account_owner"):
-        owner_count = db.query(Membership).filter(
-            Membership.scope_type == "account",
-            Membership.scope_id == tenant_id,
-            Membership.status == "active",
-            Membership.role_name.in_(["account_owner", "owner"]),
-        ).count()
+        count_result = await db.execute(
+            select(func.count()).select_from(Membership).where(
+                Membership.scope_type == "account",
+                Membership.scope_id == tenant_id,
+                Membership.status == "active",
+                Membership.role_name.in_(["account_owner", "owner"]),
+            )
+        )
+        owner_count = count_result.scalar()
         if owner_count <= 1:
             raise ValueError("Cannot remove last owner")
 
     membership.role_name = new_role
-    db.commit()
-    db.refresh(membership)
+    await db.commit()
+    await db.refresh(membership)
     return membership
 
 
-def remove_user_from_tenant(db: Session, tenant_id: UUID, user_id: UUID) -> Membership | None:
-    membership = db.query(Membership).filter(
-        Membership.scope_type == "account",
-        Membership.scope_id == tenant_id,
-        Membership.user_id == user_id,
-        Membership.status == "active",
-    ).first()
+async def remove_user_from_tenant(db: AsyncSession, tenant_id: UUID, user_id: UUID) -> Membership | None:
+    result = await db.execute(
+        select(Membership).where(
+            Membership.scope_type == "account",
+            Membership.scope_id == tenant_id,
+            Membership.user_id == user_id,
+            Membership.status == "active",
+        )
+    )
+    membership = result.scalar_one_or_none()
 
     if not membership:
         return None
@@ -153,34 +169,40 @@ def remove_user_from_tenant(db: Session, tenant_id: UUID, user_id: UUID) -> Memb
 
     # Prevent removing the last owner / account_owner.
     if current_role in ("owner", "account_owner"):
-        owner_count = db.query(Membership).filter(
-            Membership.scope_type == "account",
-            Membership.scope_id == tenant_id,
-            Membership.status == "active",
-            Membership.role_name.in_(["account_owner", "owner"]),
-        ).count()
+        count_result = await db.execute(
+            select(func.count()).select_from(Membership).where(
+                Membership.scope_type == "account",
+                Membership.scope_id == tenant_id,
+                Membership.status == "active",
+                Membership.role_name.in_(["account_owner", "owner"]),
+            )
+        )
+        owner_count = count_result.scalar()
         if owner_count <= 1:
             raise ValueError("Cannot remove last owner")
 
     membership.status = "removed"
-    db.commit()
-    db.refresh(membership)
+    await db.commit()
+    await db.refresh(membership)
     return membership
 
 
-def reactivate_user_in_tenant(db: Session, tenant_id: UUID, user_id: UUID) -> Membership | None:
+async def reactivate_user_in_tenant(db: AsyncSession, tenant_id: UUID, user_id: UUID) -> Membership | None:
     """Reactivate a previously removed membership (status 'removed' → 'active')."""
-    membership = db.query(Membership).filter(
-        Membership.scope_type == "account",
-        Membership.scope_id == tenant_id,
-        Membership.user_id == user_id,
-        Membership.status == "removed",
-    ).first()
+    result = await db.execute(
+        select(Membership).where(
+            Membership.scope_type == "account",
+            Membership.scope_id == tenant_id,
+            Membership.user_id == user_id,
+            Membership.status == "removed",
+        )
+    )
+    membership = result.scalar_one_or_none()
 
     if not membership:
         return None
 
     membership.status = "active"
-    db.commit()
-    db.refresh(membership)
+    await db.commit()
+    await db.refresh(membership)
     return membership

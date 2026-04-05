@@ -1,7 +1,7 @@
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..database import get_db
 
@@ -10,11 +10,11 @@ from ..schemas.user_management import PlatformUserResponse
 from ..security import get_current_user
 from ..services.audit_service import log_audit_event
 from ..services.user_service import (
-    delete_user_async,
+    delete_user,
     demote_from_platform_admin,
     get_user_by_id,
     promote_to_platform_admin,
-    suspend_user_async,
+    suspend_user,
     unsuspend_user,
 )
 from ..services.cognito_admin_service import (
@@ -33,7 +33,7 @@ router = APIRouter()
 async def get_platform_users(
     role: str | None = Query(None, description="Filter by role name (e.g. account_owner)"),
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
 ):
     """List all users across the platform. Supports ?role= filter (platform admin only)."""
     if not current_user.is_platform_admin:
@@ -41,19 +41,19 @@ async def get_platform_users(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only platform administrators can view all users",
         )
-    return list_platform_users(db, role=role)
+    return await list_platform_users(db, role=role)
 
 
 @router.get("/platform/users/{user_id}", response_model=PlatformUserResponse)
 async def get_platform_user_detail(
     user_id: UUID,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
 ):
     """Get details for a single user including memberships (platform admin only)."""
     ensure_platform_admin(current_user, "view user details for")
 
-    user = get_user_by_id(user_id, db)
+    user = await get_user_by_id(user_id, db)
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
@@ -87,21 +87,21 @@ async def get_platform_user_detail(
 async def suspend_user_account(
     user_id: UUID,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
 ):
     """Suspend a user account (platform admin only)."""
     ensure_platform_admin(current_user, "suspend")
     ensure_not_self_target(user_id, current_user)
 
     try:
-        suspended_user = await suspend_user_async(user_id, db)
+        suspended_user = await suspend_user(user_id, db)
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=str(exc),
         )
 
-    log_audit_event(
+    await log_audit_event(
         "user_suspended",
         actor_user_id=str(current_user.id),
         db=db,
@@ -120,20 +120,20 @@ async def suspend_user_account(
 async def unsuspend_user_account(
     user_id: UUID,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
 ):
     """Unsuspend a user account (platform admin only)."""
     ensure_platform_admin(current_user, "unsuspend")
 
     try:
-        unsuspended_user = unsuspend_user(user_id, db)
+        unsuspended_user = await unsuspend_user(user_id, db)
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=str(exc),
         )
 
-    log_audit_event(
+    await log_audit_event(
         "user_unsuspended",
         actor_user_id=str(current_user.id),
         db=db,
@@ -152,20 +152,20 @@ async def unsuspend_user_account(
 async def promote_platform_admin_account(
     user_id: UUID,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
 ):
     """Grant platform admin access to another user (platform admin only)."""
     ensure_platform_admin(current_user, "promote")
 
     try:
-        promoted_user = promote_to_platform_admin(user_id, db)
+        promoted_user = await promote_to_platform_admin(user_id, db)
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=str(exc),
         ) from exc
 
-    log_audit_event(
+    await log_audit_event(
         "user_promoted_to_platform_admin",
         actor_user_id=str(current_user.id),
         db=db,
@@ -184,7 +184,7 @@ async def promote_platform_admin_account(
 async def demote_platform_admin_account(
     user_id: UUID,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
 ):
     """Remove platform admin access from another user (platform admin only)."""
     ensure_platform_admin(current_user, "demote")
@@ -195,14 +195,14 @@ async def demote_platform_admin_account(
         )
 
     try:
-        demoted_user = demote_from_platform_admin(user_id, db)
+        demoted_user = await demote_from_platform_admin(user_id, db)
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST if "last platform administrator" in str(exc) else status.HTTP_404_NOT_FOUND,
             detail=str(exc),
         ) from exc
 
-    log_audit_event(
+    await log_audit_event(
         "user_demoted_from_platform_admin",
         actor_user_id=str(current_user.id),
         db=db,
@@ -224,7 +224,7 @@ async def demote_platform_admin_account(
 async def delete_platform_user(
     user_id: UUID,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
 ):
     """Permanently delete a user from Cognito and the database (platform admin only).
 
@@ -235,7 +235,7 @@ async def delete_platform_user(
     ensure_not_self_target(user_id, current_user)
 
     try:
-        result = await delete_user_async(user_id, db)
+        result = await delete_user(user_id, db)
     except ValueError as exc:
         detail = str(exc)
         code = status.HTTP_404_NOT_FOUND
@@ -243,7 +243,7 @@ async def delete_platform_user(
             code = status.HTTP_400_BAD_REQUEST
         raise HTTPException(status_code=code, detail=detail) from exc
 
-    log_audit_event(
+    await log_audit_event(
         "user_permanently_deleted",
         actor_user_id=str(current_user.id),
         db=db,
@@ -265,12 +265,12 @@ async def delete_platform_user(
 async def disable_cognito_user(
     user_id: UUID,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
 ):
     """Disable a user in Cognito — blocks sign-in but preserves the account (platform admin only)."""
     ensure_platform_admin(current_user, "disable Cognito account for")
 
-    user = get_user_by_id(user_id, db)
+    user = await get_user_by_id(user_id, db)
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
@@ -278,7 +278,7 @@ async def disable_cognito_user(
     if "error" in result:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=result["error"])
 
-    log_audit_event(
+    await log_audit_event(
         "cognito_user_disabled",
         actor_user_id=str(current_user.id),
         db=db,
@@ -293,12 +293,12 @@ async def disable_cognito_user(
 async def enable_cognito_user(
     user_id: UUID,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
 ):
     """Re-enable a disabled Cognito user (platform admin only)."""
     ensure_platform_admin(current_user, "enable Cognito account for")
 
-    user = get_user_by_id(user_id, db)
+    user = await get_user_by_id(user_id, db)
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
@@ -306,7 +306,7 @@ async def enable_cognito_user(
     if "error" in result:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=result["error"])
 
-    log_audit_event(
+    await log_audit_event(
         "cognito_user_enabled",
         actor_user_id=str(current_user.id),
         db=db,
@@ -321,12 +321,12 @@ async def enable_cognito_user(
 async def get_cognito_user_status(
     user_id: UUID,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
 ):
     """Look up a user's status in Cognito (platform admin only)."""
     ensure_platform_admin(current_user, "view Cognito status for")
 
-    user = get_user_by_id(user_id, db)
+    user = await get_user_by_id(user_id, db)
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
@@ -347,12 +347,12 @@ async def get_cognito_user_status(
 async def reset_cognito_user_password(
     user_id: UUID,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
 ):
     """Force a password reset for a user — Cognito sends them a reset code (platform admin only)."""
     ensure_platform_admin(current_user, "reset password for")
 
-    user = get_user_by_id(user_id, db)
+    user = await get_user_by_id(user_id, db)
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
@@ -360,7 +360,7 @@ async def reset_cognito_user_password(
     if "error" in result:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=result["error"])
 
-    log_audit_event(
+    await log_audit_event(
         "cognito_password_reset_forced",
         actor_user_id=str(current_user.id),
         db=db,

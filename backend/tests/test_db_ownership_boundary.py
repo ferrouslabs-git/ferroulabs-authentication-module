@@ -7,7 +7,7 @@ def test_auth_database_module_reuses_host_runtime_objects():
     from app.auth_usermanagement import database as auth_db
 
     assert auth_db.Base is host_db.Base
-    assert auth_db.SessionLocal is host_db.SessionLocal
+    assert auth_db.AsyncSessionLocal is host_db.AsyncSessionLocal
     assert auth_db.engine is host_db.engine
     assert auth_db.get_db is host_db.get_db
 

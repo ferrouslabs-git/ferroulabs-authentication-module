@@ -23,18 +23,19 @@ from app.auth_usermanagement.services.invitation_service import (
 
 # ── Fake DB helpers ──────────────────────────────────────────────
 
-class _FakeQuery:
-    def __init__(self, result):
-        self._result = result
+class _FakeResult:
+    """Mimics SQLAlchemy CursorResult."""
+    def __init__(self, rows):
+        self._rows = rows if isinstance(rows, list) else ([rows] if rows is not None else [])
 
-    def filter(self, *args, **kwargs):
+    def scalar_one_or_none(self):
+        return self._rows[0] if self._rows else None
+
+    def scalars(self):
         return self
 
-    def first(self):
-        return self._result
-
     def all(self):
-        return self._result if isinstance(self._result, list) else []
+        return self._rows
 
 
 class _FakeSession:
@@ -48,18 +49,22 @@ class _FakeSession:
     def add(self, obj):
         self.added.append(obj)
 
-    def commit(self):
+    async def commit(self):
         self.commits += 1
 
-    def refresh(self, obj):
+    async def flush(self):
+        pass
+
+    async def refresh(self, obj, attribute_names=None):
         self.refreshed.append(obj)
 
-    def query(self, model):
-        if model is Invitation:
-            return _FakeQuery(self.pending_invites)
-        if model is Membership:
-            return _FakeQuery(self.membership_result)
-        return _FakeQuery(None)
+    async def execute(self, stmt, *args, **kwargs):
+        stmt_str = str(stmt)
+        if "invitation" in stmt_str.lower():
+            return _FakeResult(self.pending_invites)
+        if "membership" in stmt_str.lower():
+            return _FakeResult(self.membership_result)
+        return _FakeResult(None)
 
 
 # ── Test helpers ─────────────────────────────────────────────────
@@ -83,12 +88,13 @@ def _make_invitation(**overrides):
 # ── Create invitation: scope columns ────────────────────────────
 
 class TestCreateScopedInvitation:
-    def test_account_scope_invite(self):
+    @pytest.mark.asyncio
+    async def test_account_scope_invite(self):
         """Account-scope invite creates invitation with target_scope_type=account."""
         db = _FakeSession()
         tenant_id = uuid4()
 
-        inv = create_invitation(
+        inv = (await create_invitation(
             db=db,
             tenant_id=tenant_id,
             email="a@example.com",
@@ -97,19 +103,20 @@ class TestCreateScopedInvitation:
             target_scope_type="account",
             target_scope_id=tenant_id,
             target_role_name="account_admin",
-        )[0]
+        ))[0]
 
         assert inv.target_scope_type == "account"
         assert inv.target_scope_id == tenant_id
         assert inv.target_role_name == "account_admin"
 
-    def test_space_scope_invite(self):
+    @pytest.mark.asyncio
+    async def test_space_scope_invite(self):
         """Space-scope invite creates invitation with target_scope_type=space."""
         db = _FakeSession()
         tenant_id = uuid4()
         space_id = uuid4()
 
-        inv = create_invitation(
+        inv = (await create_invitation(
             db=db,
             tenant_id=tenant_id,
             email="b@example.com",
@@ -118,24 +125,25 @@ class TestCreateScopedInvitation:
             target_scope_type="space",
             target_scope_id=space_id,
             target_role_name="space_member",
-        )[0]
+        ))[0]
 
         assert inv.target_scope_type == "space"
         assert inv.target_scope_id == space_id
         assert inv.target_role_name == "space_member"
 
-    def test_legacy_invite_defaults_to_account_scope(self):
+    @pytest.mark.asyncio
+    async def test_legacy_invite_defaults_to_account_scope(self):
         """Legacy invite (no scope fields) defaults to account scope."""
         db = _FakeSession()
         tenant_id = uuid4()
 
-        inv = create_invitation(
+        inv = (await create_invitation(
             db=db,
             tenant_id=tenant_id,
             email="c@example.com",
             role="member",
             created_by=uuid4(),
-        )[0]
+        ))[0]
 
         assert inv.target_scope_type == "account"
         assert inv.target_scope_id == tenant_id
@@ -184,7 +192,8 @@ class TestInviteAuthority:
 # ── Accept invitation: scoped membership ─────────────────────────
 
 class TestAcceptScopedInvitation:
-    def test_accept_creates_account_scoped_membership(self):
+    @pytest.mark.asyncio
+    async def test_accept_creates_account_scoped_membership(self):
         """Accept invitation creates membership with scope_type=account."""
         db = _FakeSession(membership_result=None)
         inv = _make_invitation(
@@ -195,14 +204,15 @@ class TestAcceptScopedInvitation:
         )
         user = SimpleNamespace(id=uuid4(), email="new@example.com")
 
-        membership = accept_invitation(db, inv, user)
+        membership = await accept_invitation(db, inv, user)
 
         assert membership.scope_type == "account"
         assert membership.scope_id == inv.target_scope_id
         assert membership.role_name == "account_admin"
         assert membership.status == "active"
 
-    def test_accept_creates_space_scoped_membership(self):
+    @pytest.mark.asyncio
+    async def test_accept_creates_space_scoped_membership(self):
         """Accept invitation in space scope creates scope_type=space membership."""
         db = _FakeSession(membership_result=None)
         space_id = uuid4()
@@ -214,7 +224,7 @@ class TestAcceptScopedInvitation:
         )
         user = SimpleNamespace(id=uuid4(), email="space@example.com")
 
-        membership = accept_invitation(db, inv, user)
+        membership = await accept_invitation(db, inv, user)
 
         assert membership.scope_type == "space"
         assert membership.scope_id == space_id

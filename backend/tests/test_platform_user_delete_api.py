@@ -6,9 +6,6 @@ from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
 
 from app.auth_usermanagement.models.membership import Membership
 from app.auth_usermanagement.models.session import Session as AuthSession
@@ -17,22 +14,16 @@ from app.auth_usermanagement.models.user import User
 from app.auth_usermanagement.security import dependencies as security_dependencies
 from app.database import Base, get_db
 from app.main import app
+from tests.async_test_utils import make_test_db, make_async_app
 
 
 def _make_db():
-    engine = create_engine(
-        "sqlite://",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
-    Base.metadata.create_all(engine)
-    SessionLocal = sessionmaker(bind=engine)
-    return engine, SessionLocal
+    return make_test_db()
 
 
-def _seed(SessionLocal):
+def _seed(SyncSession):
     """Seed a platform admin, a regular target user, and a tenant with memberships."""
-    session = SessionLocal()
+    session = SyncSession()
     tenant = Tenant(name="Acme Corp")
     admin_user = User(
         cognito_sub="admin-sub",
@@ -72,13 +63,10 @@ def _seed(SessionLocal):
     return ids
 
 
-def _client(monkeypatch, SessionLocal, user_sub):
-    def _override_get_db():
-        db = SessionLocal()
-        try:
-            yield db
-        finally:
-            db.close()
+def _client(monkeypatch, AsyncSessionLocal, user_sub):
+    async def _override_get_db():
+        async with AsyncSessionLocal() as session:
+            yield session
 
     monkeypatch.setattr(
         security_dependencies,
@@ -98,12 +86,12 @@ def _headers():
 
 @patch("app.auth_usermanagement.services.cognito_admin_service.admin_delete_user")
 def test_delete_user_removes_from_cognito_and_db(mock_cognito_delete, monkeypatch):
-    engine, SessionLocal = _make_db()
-    ids = _seed(SessionLocal)
+    sync_engine, SyncSession, async_engine, AsyncSessionLocal = _make_db()
+    ids = _seed(SyncSession)
     mock_cognito_delete.return_value = {"deleted": True}
 
     try:
-        with _client(monkeypatch, SessionLocal, ids["admin_sub"]) as client:
+        with _client(monkeypatch, AsyncSessionLocal, ids["admin_sub"]) as client:
             resp = client.delete(
                 f"/auth/platform/users/{ids['target_id']}",
                 headers=_headers(),
@@ -115,22 +103,22 @@ def test_delete_user_removes_from_cognito_and_db(mock_cognito_delete, monkeypatc
             mock_cognito_delete.assert_called_once_with("target@example.com")
 
         # Verify user is gone from DB
-        session = SessionLocal()
+        session = SyncSession()
         assert session.query(User).filter(User.id == ids["target_id"]).first() is None
         assert session.query(Membership).filter(Membership.user_id == ids["target_id"]).count() == 0
         session.close()
     finally:
         app.dependency_overrides.clear()
-        Base.metadata.drop_all(engine)
+        Base.metadata.drop_all(sync_engine)
 
 
 @patch("app.auth_usermanagement.services.cognito_admin_service.admin_delete_user")
 def test_delete_rejects_self_target(mock_cognito_delete, monkeypatch):
-    engine, SessionLocal = _make_db()
-    ids = _seed(SessionLocal)
+    sync_engine, SyncSession, async_engine, AsyncSessionLocal = _make_db()
+    ids = _seed(SyncSession)
 
     try:
-        with _client(monkeypatch, SessionLocal, ids["admin_sub"]) as client:
+        with _client(monkeypatch, AsyncSessionLocal, ids["admin_sub"]) as client:
             resp = client.delete(
                 f"/auth/platform/users/{ids['admin_id']}",
                 headers=_headers(),
@@ -139,24 +127,24 @@ def test_delete_rejects_self_target(mock_cognito_delete, monkeypatch):
             mock_cognito_delete.assert_not_called()
     finally:
         app.dependency_overrides.clear()
-        Base.metadata.drop_all(engine)
+        Base.metadata.drop_all(sync_engine)
 
 
 @patch("app.auth_usermanagement.services.cognito_admin_service.admin_delete_user")
 def test_delete_rejects_platform_admin_target(mock_cognito_delete, monkeypatch):
     """Cannot delete a user who is still a platform admin."""
-    engine, SessionLocal = _make_db()
-    ids = _seed(SessionLocal)
+    sync_engine, SyncSession, async_engine, AsyncSessionLocal = _make_db()
+    ids = _seed(SyncSession)
 
     # Make target a platform admin
-    session = SessionLocal()
+    session = SyncSession()
     user = session.query(User).filter(User.id == ids["target_id"]).first()
     user.is_platform_admin = True
     session.commit()
     session.close()
 
     try:
-        with _client(monkeypatch, SessionLocal, ids["admin_sub"]) as client:
+        with _client(monkeypatch, AsyncSessionLocal, ids["admin_sub"]) as client:
             resp = client.delete(
                 f"/auth/platform/users/{ids['target_id']}",
                 headers=_headers(),
@@ -166,17 +154,17 @@ def test_delete_rejects_platform_admin_target(mock_cognito_delete, monkeypatch):
             mock_cognito_delete.assert_not_called()
     finally:
         app.dependency_overrides.clear()
-        Base.metadata.drop_all(engine)
+        Base.metadata.drop_all(sync_engine)
 
 
 @patch("app.auth_usermanagement.services.cognito_admin_service.admin_delete_user")
 def test_delete_rejects_last_tenant_owner(mock_cognito_delete, monkeypatch):
     """Cannot delete a user who is the sole owner of a tenant."""
-    engine, SessionLocal = _make_db()
-    ids = _seed(SessionLocal)
+    sync_engine, SyncSession, async_engine, AsyncSessionLocal = _make_db()
+    ids = _seed(SyncSession)
 
     # Make target the sole owner of a NEW tenant
-    session = SessionLocal()
+    session = SyncSession()
     solo_tenant = Tenant(name="Solo Corp")
     session.add(solo_tenant)
     session.commit()
@@ -193,7 +181,7 @@ def test_delete_rejects_last_tenant_owner(mock_cognito_delete, monkeypatch):
     session.close()
 
     try:
-        with _client(monkeypatch, SessionLocal, ids["admin_sub"]) as client:
+        with _client(monkeypatch, AsyncSessionLocal, ids["admin_sub"]) as client:
             resp = client.delete(
                 f"/auth/platform/users/{ids['target_id']}",
                 headers=_headers(),
@@ -203,13 +191,13 @@ def test_delete_rejects_last_tenant_owner(mock_cognito_delete, monkeypatch):
             mock_cognito_delete.assert_not_called()
     finally:
         app.dependency_overrides.clear()
-        Base.metadata.drop_all(engine)
+        Base.metadata.drop_all(sync_engine)
 
 
 def test_delete_requires_platform_admin(monkeypatch):
     """Regular users cannot delete other users."""
-    engine, SessionLocal = _make_db()
-    session = SessionLocal()
+    sync_engine, SyncSession, async_engine, AsyncSessionLocal = _make_db()
+    session = SyncSession()
     regular = User(cognito_sub="regular-sub", email="regular@example.com", name="Regular")
     target = User(cognito_sub="target-del-sub", email="target-del@example.com", name="T")
     session.add_all([regular, target])
@@ -218,7 +206,7 @@ def test_delete_requires_platform_admin(monkeypatch):
     session.close()
 
     try:
-        with _client(monkeypatch, SessionLocal, "regular-sub") as client:
+        with _client(monkeypatch, AsyncSessionLocal, "regular-sub") as client:
             resp = client.delete(
                 f"/auth/platform/users/{target_id}",
                 headers=_headers(),
@@ -226,7 +214,7 @@ def test_delete_requires_platform_admin(monkeypatch):
             assert resp.status_code == 403
     finally:
         app.dependency_overrides.clear()
-        Base.metadata.drop_all(engine)
+        Base.metadata.drop_all(sync_engine)
 
 
 # ── Cognito admin endpoints ─────────────────────────────────────
@@ -234,12 +222,12 @@ def test_delete_requires_platform_admin(monkeypatch):
 
 @patch("app.auth_usermanagement.api.platform_user_routes.admin_disable_user_async")
 def test_cognito_disable_user(mock_disable, monkeypatch):
-    engine, SessionLocal = _make_db()
-    ids = _seed(SessionLocal)
+    sync_engine, SyncSession, async_engine, AsyncSessionLocal = _make_db()
+    ids = _seed(SyncSession)
     mock_disable.return_value = {"disabled": True}
 
     try:
-        with _client(monkeypatch, SessionLocal, ids["admin_sub"]) as client:
+        with _client(monkeypatch, AsyncSessionLocal, ids["admin_sub"]) as client:
             resp = client.post(
                 f"/auth/platform/users/{ids['target_id']}/cognito/disable",
                 headers=_headers(),
@@ -249,17 +237,17 @@ def test_cognito_disable_user(mock_disable, monkeypatch):
             mock_disable.assert_called_once_with("target@example.com")
     finally:
         app.dependency_overrides.clear()
-        Base.metadata.drop_all(engine)
+        Base.metadata.drop_all(sync_engine)
 
 
 @patch("app.auth_usermanagement.api.platform_user_routes.admin_enable_user_async")
 def test_cognito_enable_user(mock_enable, monkeypatch):
-    engine, SessionLocal = _make_db()
-    ids = _seed(SessionLocal)
+    sync_engine, SyncSession, async_engine, AsyncSessionLocal = _make_db()
+    ids = _seed(SyncSession)
     mock_enable.return_value = {"enabled": True}
 
     try:
-        with _client(monkeypatch, SessionLocal, ids["admin_sub"]) as client:
+        with _client(monkeypatch, AsyncSessionLocal, ids["admin_sub"]) as client:
             resp = client.post(
                 f"/auth/platform/users/{ids['target_id']}/cognito/enable",
                 headers=_headers(),
@@ -269,13 +257,13 @@ def test_cognito_enable_user(mock_enable, monkeypatch):
             mock_enable.assert_called_once_with("target@example.com")
     finally:
         app.dependency_overrides.clear()
-        Base.metadata.drop_all(engine)
+        Base.metadata.drop_all(sync_engine)
 
 
 @patch("app.auth_usermanagement.api.platform_user_routes.admin_get_user_async")
 def test_get_cognito_user_status(mock_get, monkeypatch):
-    engine, SessionLocal = _make_db()
-    ids = _seed(SessionLocal)
+    sync_engine, SyncSession, async_engine, AsyncSessionLocal = _make_db()
+    ids = _seed(SyncSession)
     mock_get.return_value = {
         "username": "target@example.com",
         "status": "CONFIRMED",
@@ -284,7 +272,7 @@ def test_get_cognito_user_status(mock_get, monkeypatch):
     }
 
     try:
-        with _client(monkeypatch, SessionLocal, ids["admin_sub"]) as client:
+        with _client(monkeypatch, AsyncSessionLocal, ids["admin_sub"]) as client:
             resp = client.get(
                 f"/auth/platform/users/{ids['target_id']}/cognito",
                 headers=_headers(),
@@ -296,17 +284,17 @@ def test_get_cognito_user_status(mock_get, monkeypatch):
             mock_get.assert_called_once_with("target@example.com")
     finally:
         app.dependency_overrides.clear()
-        Base.metadata.drop_all(engine)
+        Base.metadata.drop_all(sync_engine)
 
 
 @patch("app.auth_usermanagement.api.platform_user_routes.admin_reset_user_password_async")
 def test_reset_cognito_password(mock_reset, monkeypatch):
-    engine, SessionLocal = _make_db()
-    ids = _seed(SessionLocal)
+    sync_engine, SyncSession, async_engine, AsyncSessionLocal = _make_db()
+    ids = _seed(SyncSession)
     mock_reset.return_value = {"reset_initiated": True}
 
     try:
-        with _client(monkeypatch, SessionLocal, ids["admin_sub"]) as client:
+        with _client(monkeypatch, AsyncSessionLocal, ids["admin_sub"]) as client:
             resp = client.post(
                 f"/auth/platform/users/{ids['target_id']}/cognito/reset-password",
                 headers=_headers(),
@@ -316,13 +304,13 @@ def test_reset_cognito_password(mock_reset, monkeypatch):
             mock_reset.assert_called_once_with("target@example.com")
     finally:
         app.dependency_overrides.clear()
-        Base.metadata.drop_all(engine)
+        Base.metadata.drop_all(sync_engine)
 
 
 @patch("app.auth_usermanagement.api.platform_user_routes.admin_disable_user_async")
 def test_cognito_endpoints_require_platform_admin(mock_disable, monkeypatch):
-    engine, SessionLocal = _make_db()
-    session = SessionLocal()
+    sync_engine, SyncSession, async_engine, AsyncSessionLocal = _make_db()
+    session = SyncSession()
     regular = User(cognito_sub="reg-sub", email="reg@example.com", name="Regular")
     target = User(cognito_sub="tgt-sub", email="tgt@example.com", name="Target")
     session.add_all([regular, target])
@@ -331,7 +319,7 @@ def test_cognito_endpoints_require_platform_admin(mock_disable, monkeypatch):
     session.close()
 
     try:
-        with _client(monkeypatch, SessionLocal, "reg-sub") as client:
+        with _client(monkeypatch, AsyncSessionLocal, "reg-sub") as client:
             resp = client.post(
                 f"/auth/platform/users/{target_id}/cognito/disable",
                 headers=_headers(),
@@ -340,4 +328,4 @@ def test_cognito_endpoints_require_platform_admin(mock_disable, monkeypatch):
             mock_disable.assert_not_called()
     finally:
         app.dependency_overrides.clear()
-        Base.metadata.drop_all(engine)
+        Base.metadata.drop_all(sync_engine)

@@ -3,7 +3,8 @@ import hashlib
 from datetime import UTC, datetime
 from uuid import UUID
 
-from sqlalchemy.orm import Session
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models.session import Session as AuthSession
 
@@ -17,8 +18,8 @@ def _hash_refresh_token(refresh_token: str) -> str:
     return hashlib.sha256(refresh_token.encode("utf-8")).hexdigest()
 
 
-def create_user_session(
-    db: Session,
+async def create_user_session(
+    db: AsyncSession,
     user_id: UUID,
     refresh_token: str,
     *,
@@ -37,37 +38,42 @@ def create_user_session(
         expires_at=expires_at,
     )
     db.add(auth_session)
-    db.commit()
-    db.refresh(auth_session)
+    await db.commit()
+    await db.refresh(auth_session)
     return auth_session
 
 
-def list_user_sessions(
-    db: Session,
+async def list_user_sessions(
+    db: AsyncSession,
     user_id: UUID,
     *,
     include_revoked: bool = False,
     limit: int = 50,
 ) -> list[AuthSession]:
     """Return most recent sessions for a user, newest first."""
-    query = db.query(AuthSession).filter(AuthSession.user_id == user_id)
+    stmt = select(AuthSession).where(AuthSession.user_id == user_id)
     if not include_revoked:
-        query = query.filter(AuthSession.revoked_at.is_(None))
-    return query.order_by(AuthSession.created_at.desc()).limit(limit).all()
+        stmt = stmt.where(AuthSession.revoked_at.is_(None))
+    stmt = stmt.order_by(AuthSession.created_at.desc()).limit(limit)
+    result = await db.execute(stmt)
+    return list(result.scalars().all())
 
 
-def validate_refresh_session(
-    db: Session,
+async def validate_refresh_session(
+    db: AsyncSession,
     user_id: UUID,
     session_id: UUID,
     refresh_token: str,
 ) -> AuthSession | None:
     """Validate refresh token against an active, non-expired session."""
-    auth_session = db.query(AuthSession).filter(
-        AuthSession.id == session_id,
-        AuthSession.user_id == user_id,
-        AuthSession.revoked_at.is_(None),
-    ).first()
+    result = await db.execute(
+        select(AuthSession).where(
+            AuthSession.id == session_id,
+            AuthSession.user_id == user_id,
+            AuthSession.revoked_at.is_(None),
+        )
+    )
+    auth_session = result.scalar_one_or_none()
 
     if not auth_session:
         return None
@@ -81,8 +87,8 @@ def validate_refresh_session(
     return auth_session
 
 
-def rotate_user_session(
-    db: Session,
+async def rotate_user_session(
+    db: AsyncSession,
     user_id: UUID,
     session_id: UUID,
     old_refresh_token: str,
@@ -94,7 +100,7 @@ def rotate_user_session(
     expires_at: datetime | None = None,
 ) -> AuthSession | None:
     """Rotate refresh token by revoking old session and creating a replacement."""
-    existing = validate_refresh_session(db, user_id, session_id, old_refresh_token)
+    existing = await validate_refresh_session(db, user_id, session_id, old_refresh_token)
     if not existing:
         return None
 
@@ -109,43 +115,47 @@ def rotate_user_session(
         expires_at=expires_at or existing.expires_at,
     )
     db.add(replacement)
-    db.commit()
-    db.refresh(replacement)
+    await db.commit()
+    await db.refresh(replacement)
     return replacement
 
 
-def revoke_user_session(db: Session, user_id: UUID, session_id: UUID) -> AuthSession | None:
+async def revoke_user_session(db: AsyncSession, user_id: UUID, session_id: UUID) -> AuthSession | None:
     """Revoke a specific session if it belongs to the user and is active."""
-    auth_session = db.query(AuthSession).filter(
-        AuthSession.id == session_id,
-        AuthSession.user_id == user_id,
-        AuthSession.revoked_at.is_(None),
-    ).first()
+    result = await db.execute(
+        select(AuthSession).where(
+            AuthSession.id == session_id,
+            AuthSession.user_id == user_id,
+            AuthSession.revoked_at.is_(None),
+        )
+    )
+    auth_session = result.scalar_one_or_none()
 
     if not auth_session:
         return None
 
     auth_session.revoked_at = utc_now()
-    db.commit()
-    db.refresh(auth_session)
+    await db.commit()
+    await db.refresh(auth_session)
     return auth_session
 
 
-def revoke_all_user_sessions(
-    db: Session,
+async def revoke_all_user_sessions(
+    db: AsyncSession,
     user_id: UUID,
     except_session_id: UUID | None = None,
 ) -> int:
     """Revoke all active sessions for a user and return number revoked."""
-    query = db.query(AuthSession).filter(
+    stmt = select(AuthSession).where(
         AuthSession.user_id == user_id,
         AuthSession.revoked_at.is_(None),
     )
 
     if except_session_id:
-        query = query.filter(AuthSession.id != except_session_id)
+        stmt = stmt.where(AuthSession.id != except_session_id)
 
-    sessions = query.all()
+    result = await db.execute(stmt)
+    sessions = result.scalars().all()
     if not sessions:
         return 0
 
@@ -153,5 +163,5 @@ def revoke_all_user_sessions(
     for auth_session in sessions:
         auth_session.revoked_at = now
 
-    db.commit()
+    await db.commit()
     return len(sessions)

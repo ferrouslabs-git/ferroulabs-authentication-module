@@ -68,7 +68,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         client_ip = request.client.host if request.client else "unknown"
         key = f"{client_ip}:{path}"
 
-        if self.rate_limiter.is_rate_limited(key, self.limit, self.window_seconds):
+        if await self.rate_limiter.is_rate_limited(key, self.limit, self.window_seconds):
             retry_after = self.window_seconds
             return JSONResponse(
                 status_code=429,

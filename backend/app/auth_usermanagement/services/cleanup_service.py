@@ -10,7 +10,7 @@ Host Integration Contract
 -------------------------
 - Host owns: DB engine, session factory, scheduling (cron / Celery / CloudWatch)
 - Module owns: cleanup query logic
-- Caller provides a SQLAlchemy ``Session`` — this module never creates one.
+- Caller provides an ``AsyncSession`` — this module never creates one.
 """
 from __future__ import annotations
 
@@ -18,7 +18,8 @@ import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy.orm import Session
+from sqlalchemy import delete as sa_delete, select, func
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models.audit_event import AuditEvent
 from ..models.invitation import Invitation
@@ -42,65 +43,54 @@ class CleanupResult:
     audit_events: int = 0
 
 
-def purge_expired_refresh_tokens(db: Session) -> int:
+async def purge_expired_refresh_tokens(db: AsyncSession) -> int:
     """Delete refresh tokens whose ``expires_at`` is in the past."""
     now = _utc_now()
-    count = (
-        db.query(RefreshTokenStore)
-        .filter(RefreshTokenStore.expires_at < now)
-        .delete(synchronize_session=False)
+    result = await db.execute(
+        sa_delete(RefreshTokenStore).where(RefreshTokenStore.expires_at < now)
     )
-    db.flush()
-    return count
+    await db.flush()
+    return result.rowcount
 
 
-def purge_stale_invitations(db: Session, *, older_than_days: int = 30) -> int:
+async def purge_stale_invitations(db: AsyncSession, *, older_than_days: int = 30) -> int:
     """Delete expired or revoked invitations older than *older_than_days*."""
     cutoff = _utc_now() - timedelta(days=older_than_days)
-    count = (
-        db.query(Invitation)
-        .filter(
+    now = _utc_now()
+    result = await db.execute(
+        sa_delete(Invitation).where(
             Invitation.created_at < cutoff,
-            (Invitation.expires_at < _utc_now())
-            | (Invitation.revoked_at.isnot(None)),
+            (Invitation.expires_at < now) | (Invitation.revoked_at.isnot(None)),
         )
-        .delete(synchronize_session=False)
     )
-    db.flush()
-    return count
+    await db.flush()
+    return result.rowcount
 
 
-def purge_old_rate_limit_hits(db: Session, *, older_than_hours: int = 24) -> int:
+async def purge_old_rate_limit_hits(db: AsyncSession, *, older_than_hours: int = 24) -> int:
     """Delete rate-limit hit records older than *older_than_hours*."""
     cutoff = _utc_now() - timedelta(hours=older_than_hours)
-    count = (
-        db.query(RateLimitHit)
-        .filter(RateLimitHit.hit_at < cutoff)
-        .delete(synchronize_session=False)
+    result = await db.execute(
+        sa_delete(RateLimitHit).where(RateLimitHit.hit_at < cutoff)
     )
-    db.flush()
-    return count
+    await db.flush()
+    return result.rowcount
 
 
-def purge_old_audit_events(db: Session, *, older_than_days: int = 365) -> int:
-    """Delete audit events older than *older_than_days*.
-
-    Defaults to 365 days. Pass ``0`` to skip audit cleanup entirely.
-    """
+async def purge_old_audit_events(db: AsyncSession, *, older_than_days: int = 365) -> int:
+    """Delete audit events older than *older_than_days*."""
     if older_than_days <= 0:
         return 0
     cutoff = _utc_now() - timedelta(days=older_than_days)
-    count = (
-        db.query(AuditEvent)
-        .filter(AuditEvent.timestamp < cutoff)
-        .delete(synchronize_session=False)
+    result = await db.execute(
+        sa_delete(AuditEvent).where(AuditEvent.timestamp < cutoff)
     )
-    db.flush()
-    return count
+    await db.flush()
+    return result.rowcount
 
 
-def run_cleanup(
-    db: Session,
+async def run_cleanup(
+    db: AsyncSession,
     *,
     invitation_days: int = 30,
     rate_limit_hours: int = 24,
@@ -109,21 +99,13 @@ def run_cleanup(
     """Execute all cleanup tasks in a single transaction.
 
     The caller is responsible for committing or rolling back the session
-    afterwards. Typical usage::
-
-        db = SessionLocal()
-        try:
-            result = run_cleanup(db)
-            db.commit()
-            print(result)
-        finally:
-            db.close()
+    afterwards.
     """
     result = CleanupResult(
-        refresh_tokens=purge_expired_refresh_tokens(db),
-        invitations=purge_stale_invitations(db, older_than_days=invitation_days),
-        rate_limit_hits=purge_old_rate_limit_hits(db, older_than_hours=rate_limit_hours),
-        audit_events=purge_old_audit_events(db, older_than_days=audit_retention_days),
+        refresh_tokens=await purge_expired_refresh_tokens(db),
+        invitations=await purge_stale_invitations(db, older_than_days=invitation_days),
+        rate_limit_hits=await purge_old_rate_limit_hits(db, older_than_hours=rate_limit_hours),
+        audit_events=await purge_old_audit_events(db, older_than_days=audit_retention_days),
     )
 
     logger.info(

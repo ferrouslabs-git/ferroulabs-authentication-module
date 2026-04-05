@@ -6,7 +6,9 @@ from hashlib import sha256
 from secrets import token_urlsafe
 from uuid import UUID
 
-from sqlalchemy.orm import Session
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from ..models.invitation import Invitation
 from ..models.membership import Membership
@@ -35,8 +37,8 @@ def hash_token(token: str) -> str:
     return sha256(token.encode()).hexdigest()
 
 
-def create_invitation(
-    db: Session,
+async def create_invitation(
+    db: AsyncSession,
     tenant_id: UUID,
     email: str,
     role: str,
@@ -46,33 +48,20 @@ def create_invitation(
     target_scope_id: UUID | None = None,
     target_role_name: str | None = None,
 ) -> tuple["Invitation", str]:
-    """Create a new invitation token for a user email within a tenant/scope.
-
-    Returns:
-        Tuple of (invitation, raw_token). The raw_token is NOT stored in the
-        database — only its SHA-256 hash is persisted. The caller must use the
-        returned raw_token for email URLs and API responses.
-
-    If a pending invitation already exists for the same email+tenant, revoke the
-    older one so only the latest token remains active.
-    
-    Args:
-        expires_in_days: Days until invitation expires (default 2 days = 48 hours)
-        role: Legacy role string (used to derive target_role_name if not provided)
-        target_scope_type: 'account' or 'space'. Defaults to 'account'.
-        target_scope_id: UUID of scope. Defaults to tenant_id.
-        target_role_name: v3 role name. Derived from 'role' if not provided.
-    """
+    """Create a new invitation token for a user email within a tenant/scope."""
     normalized_email = email.lower().strip()
     now = utc_now()
 
-    existing_pending = db.query(Invitation).filter(
-        Invitation.tenant_id == tenant_id,
-        Invitation.email == normalized_email,
-        Invitation.accepted_at.is_(None),
-        Invitation.revoked_at.is_(None),
-        Invitation.expires_at > now,
-    ).all()
+    result = await db.execute(
+        select(Invitation).where(
+            Invitation.tenant_id == tenant_id,
+            Invitation.email == normalized_email,
+            Invitation.accepted_at.is_(None),
+            Invitation.revoked_at.is_(None),
+            Invitation.expires_at > now,
+        )
+    )
+    existing_pending = result.scalars().all()
 
     for pending in existing_pending:
         pending.revoked_at = now
@@ -95,18 +84,23 @@ def create_invitation(
         target_role_name=resolved_role_name,
     )
     db.add(invitation)
-    db.commit()
-    db.refresh(invitation)
+    await db.commit()
+    await db.refresh(invitation, attribute_names=["tenant"])
     return invitation, raw_token
 
 
-def get_invitation_by_token(db: Session, token: str) -> Invitation | None:
+async def get_invitation_by_token(db: AsyncSession, token: str) -> Invitation | None:
     """Return invitation by token hash, or None if missing."""
     token_hash = hash_token(token)
-    return db.query(Invitation).filter(Invitation.token_hash == token_hash).first()
+    result = await db.execute(
+        select(Invitation)
+        .options(selectinload(Invitation.tenant))
+        .where(Invitation.token_hash == token_hash)
+    )
+    return result.scalar_one_or_none()
 
 
-def accept_invitation(db: Session, invitation: Invitation, user: User) -> Membership:
+async def accept_invitation(db: AsyncSession, invitation: Invitation, user: User) -> Membership:
     """
     Accept an invitation for the authenticated user.
 
@@ -129,11 +123,14 @@ def accept_invitation(db: Session, invitation: Invitation, user: User) -> Member
         raise PermissionError("Invitation email does not match authenticated user")
 
     # Look for existing membership in the target scope
-    membership = db.query(Membership).filter(
-        Membership.user_id == user.id,
-        Membership.scope_type == invitation.target_scope_type,
-        Membership.scope_id == invitation.target_scope_id,
-    ).first()
+    result = await db.execute(
+        select(Membership).where(
+            Membership.user_id == user.id,
+            Membership.scope_type == invitation.target_scope_type,
+            Membership.scope_id == invitation.target_scope_id,
+        )
+    )
+    membership = result.scalar_one_or_none()
 
     role_name = invitation.target_role_name
     scope_type = invitation.target_scope_type
@@ -163,44 +160,44 @@ def accept_invitation(db: Session, invitation: Invitation, user: User) -> Member
 
     invitation.accepted_at = utc_now()
 
-    db.commit()
-    db.refresh(membership)
+    await db.commit()
+    await db.refresh(membership)
     return membership
 
 
-def get_tenant_invitation_by_token(db: Session, tenant_id: UUID, token: str) -> Invitation | None:
+async def get_tenant_invitation_by_token(db: AsyncSession, tenant_id: UUID, token: str) -> Invitation | None:
     """Return invitation by token hash scoped to a tenant."""
     token_hash = hash_token(token)
-    return db.query(Invitation).filter(
-        Invitation.token_hash == token_hash,
-        Invitation.tenant_id == tenant_id,
-    ).first()
+    result = await db.execute(
+        select(Invitation)
+        .options(selectinload(Invitation.tenant))
+        .where(
+            Invitation.token_hash == token_hash,
+            Invitation.tenant_id == tenant_id,
+        )
+    )
+    return result.scalar_one_or_none()
 
 
-def get_invitation_by_id(db: Session, tenant_id: UUID, invitation_id: UUID) -> Invitation | None:
+async def get_invitation_by_id(db: AsyncSession, tenant_id: UUID, invitation_id: UUID) -> Invitation | None:
     """Return invitation by its database ID scoped to a tenant."""
-    return db.query(Invitation).filter(
-        Invitation.id == invitation_id,
-        Invitation.tenant_id == tenant_id,
-    ).first()
+    result = await db.execute(
+        select(Invitation)
+        .options(selectinload(Invitation.tenant))
+        .where(
+            Invitation.id == invitation_id,
+            Invitation.tenant_id == tenant_id,
+        )
+    )
+    return result.scalar_one_or_none()
 
 
-def resend_invitation(
-    db: Session,
+async def resend_invitation(
+    db: AsyncSession,
     invitation: Invitation,
     expires_in_days: int = 2,
 ) -> tuple["Invitation", str]:
-    """Resend a pending or expired invitation by generating a fresh token.
-
-    Rules:
-    - Invitation must not be accepted
-    - Invitation must not be revoked
-    - A new token replaces the old one (old links become invalid)
-    - expires_at is reset to a fresh window
-
-    Returns:
-        Tuple of (invitation, raw_token).
-    """
+    """Resend a pending or expired invitation by generating a fresh token."""
     if invitation.is_accepted:
         raise ValueError("Accepted invitations cannot be resent")
     if invitation.is_revoked:
@@ -214,12 +211,12 @@ def resend_invitation(
     invitation.token_hash = hashed
     invitation.expires_at = now + timedelta(days=expires_in_days)
 
-    db.commit()
-    db.refresh(invitation)
+    await db.commit()
+    await db.refresh(invitation, attribute_names=["tenant"])
     return invitation, raw_token
 
 
-def revoke_invitation(db: Session, invitation: Invitation) -> Invitation:
+async def revoke_invitation(db: AsyncSession, invitation: Invitation) -> Invitation:
     """Mark a pending invitation as revoked."""
     if invitation.is_accepted:
         raise ValueError("Accepted invitations cannot be revoked")
@@ -231,25 +228,30 @@ def revoke_invitation(db: Session, invitation: Invitation) -> Invitation:
     if invitation.expires_at > now:
         invitation.expires_at = now
 
-    db.commit()
-    db.refresh(invitation)
+    await db.commit()
+    await db.refresh(invitation)
     return invitation
 
 
-def list_tenant_invitations(
-    db: Session,
+async def list_tenant_invitations(
+    db: AsyncSession,
     tenant_id: UUID,
     *,
     status_filter: str | None = None,
 ) -> list[dict]:
     """List invitations for a tenant, optionally filtered by status."""
     # Verify tenant exists
-    tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
+    tenant_result = await db.execute(select(Tenant).where(Tenant.id == tenant_id))
+    tenant = tenant_result.scalar_one_or_none()
     if not tenant:
         raise ValueError(f"Tenant not found: {tenant_id}")
 
-    query = db.query(Invitation).filter(Invitation.tenant_id == tenant_id)
-    invitations = query.order_by(Invitation.created_at.desc()).all()
+    result = await db.execute(
+        select(Invitation)
+        .where(Invitation.tenant_id == tenant_id)
+        .order_by(Invitation.created_at.desc())
+    )
+    invitations = result.scalars().all()
 
     results = []
     for inv in invitations:

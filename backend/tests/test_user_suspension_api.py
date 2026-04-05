@@ -5,9 +5,6 @@ from types import SimpleNamespace
 from uuid import uuid4
 
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
 
 from app.auth_usermanagement.models.user import User
 from app.auth_usermanagement.models.membership import Membership
@@ -15,21 +12,15 @@ from app.auth_usermanagement.models.tenant import Tenant
 from app.auth_usermanagement.security import dependencies as security_dependencies
 from app.database import Base, get_db
 from app.main import app
+from tests.async_test_utils import make_test_db
 
 
 def _make_db():
-    engine = create_engine(
-        "sqlite://",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
-    Base.metadata.create_all(engine)
-    SessionLocal = sessionmaker(bind=engine)
-    return engine, SessionLocal
+    return make_test_db()
 
 
-def _seed_users(SessionLocal):
-    session = SessionLocal()
+def _seed_users(SyncSession):
+    session = SyncSession()
     tenant = Tenant(name="Tenant Alpha")
     admin_user = User(
         cognito_sub="platform-admin-sub",
@@ -63,13 +54,10 @@ def _seed_users(SessionLocal):
     return admin_id, admin_sub, target_id
 
 
-def _client_with_auth(monkeypatch, SessionLocal, user_sub):
-    def _override_get_db():
-        db = SessionLocal()
-        try:
-            yield db
-        finally:
-            db.close()
+def _client_with_auth(monkeypatch, AsyncSessionLocal, user_sub):
+    async def _override_get_db():
+        async with AsyncSessionLocal() as session:
+            yield session
 
     monkeypatch.setattr(
         security_dependencies,
@@ -88,11 +76,11 @@ def _auth_headers():
 
 
 def test_suspend_and_unsuspend_user_endpoints(monkeypatch):
-    engine, SessionLocal = _make_db()
-    _, admin_sub, target_id = _seed_users(SessionLocal)
+    sync_engine, SyncSession, async_engine, AsyncSessionLocal = _make_db()
+    _, admin_sub, target_id = _seed_users(SyncSession)
 
     try:
-        with _client_with_auth(monkeypatch, SessionLocal, admin_sub) as client:
+        with _client_with_auth(monkeypatch, AsyncSessionLocal, admin_sub) as client:
             suspend_response = client.patch(
                 f"/auth/users/{target_id}/suspend",
                 headers=_auth_headers(),
@@ -116,15 +104,15 @@ def test_suspend_and_unsuspend_user_endpoints(monkeypatch):
             assert unsuspend_payload["suspended_at"] is None
     finally:
         app.dependency_overrides.clear()
-        Base.metadata.drop_all(engine)
+        Base.metadata.drop_all(sync_engine)
 
 
 def test_platform_admin_can_list_all_users(monkeypatch):
-    engine, SessionLocal = _make_db()
-    _, admin_sub, _ = _seed_users(SessionLocal)
+    sync_engine, SyncSession, async_engine, AsyncSessionLocal = _make_db()
+    _, admin_sub, _ = _seed_users(SyncSession)
 
     try:
-        with _client_with_auth(monkeypatch, SessionLocal, admin_sub) as client:
+        with _client_with_auth(monkeypatch, AsyncSessionLocal, admin_sub) as client:
             response = client.get(
                 "/auth/platform/users",
                 headers=_auth_headers(),
@@ -141,12 +129,12 @@ def test_platform_admin_can_list_all_users(monkeypatch):
             assert member_entry["memberships"][0]["role"] == "account_member"
     finally:
         app.dependency_overrides.clear()
-        Base.metadata.drop_all(engine)
+        Base.metadata.drop_all(sync_engine)
 
 
 def test_platform_user_listing_requires_platform_admin(monkeypatch):
-    engine, SessionLocal = _make_db()
-    session = SessionLocal()
+    sync_engine, SyncSession, async_engine, AsyncSessionLocal = _make_db()
+    session = SyncSession()
     regular_user = User(
         cognito_sub="regular-platform-list-sub",
         email="regular-platform-list@example.com",
@@ -159,7 +147,7 @@ def test_platform_user_listing_requires_platform_admin(monkeypatch):
     session.close()
 
     try:
-        with _client_with_auth(monkeypatch, SessionLocal, regular_sub) as client:
+        with _client_with_auth(monkeypatch, AsyncSessionLocal, regular_sub) as client:
             response = client.get(
                 "/auth/platform/users",
                 headers=_auth_headers(),
@@ -168,15 +156,15 @@ def test_platform_user_listing_requires_platform_admin(monkeypatch):
             assert response.json()["detail"] == "Only platform administrators can view all users"
     finally:
         app.dependency_overrides.clear()
-        Base.metadata.drop_all(engine)
+        Base.metadata.drop_all(sync_engine)
 
 
 def test_platform_admin_can_promote_and_demote_super_admin(monkeypatch):
-    engine, SessionLocal = _make_db()
-    _, admin_sub, target_id = _seed_users(SessionLocal)
+    sync_engine, SyncSession, async_engine, AsyncSessionLocal = _make_db()
+    _, admin_sub, target_id = _seed_users(SyncSession)
 
     try:
-        with _client_with_auth(monkeypatch, SessionLocal, admin_sub) as client:
+        with _client_with_auth(monkeypatch, AsyncSessionLocal, admin_sub) as client:
             promote_response = client.patch(
                 f"/auth/platform/users/{target_id}/promote",
                 headers=_auth_headers(),
@@ -192,15 +180,15 @@ def test_platform_admin_can_promote_and_demote_super_admin(monkeypatch):
             assert demote_response.json()["is_platform_admin"] is False
     finally:
         app.dependency_overrides.clear()
-        Base.metadata.drop_all(engine)
+        Base.metadata.drop_all(sync_engine)
 
 
 def test_demote_super_admin_rejects_self_target(monkeypatch):
-    engine, SessionLocal = _make_db()
-    admin_id, admin_sub, _ = _seed_users(SessionLocal)
+    sync_engine, SyncSession, async_engine, AsyncSessionLocal = _make_db()
+    admin_id, admin_sub, _ = _seed_users(SyncSession)
 
     try:
-        with _client_with_auth(monkeypatch, SessionLocal, admin_sub) as client:
+        with _client_with_auth(monkeypatch, AsyncSessionLocal, admin_sub) as client:
             response = client.patch(
                 f"/auth/platform/users/{admin_id}/demote",
                 headers=_auth_headers(),
@@ -209,12 +197,12 @@ def test_demote_super_admin_rejects_self_target(monkeypatch):
             assert response.json()["detail"] == "You cannot revoke your own super admin access"
     finally:
         app.dependency_overrides.clear()
-        Base.metadata.drop_all(engine)
+        Base.metadata.drop_all(sync_engine)
 
 
 def test_promote_super_admin_requires_platform_admin(monkeypatch):
-    engine, SessionLocal = _make_db()
-    session = SessionLocal()
+    sync_engine, SyncSession, async_engine, AsyncSessionLocal = _make_db()
+    session = SyncSession()
     regular_user = User(
         cognito_sub="regular-promote-sub",
         email="regular-promote@example.com",
@@ -235,7 +223,7 @@ def test_promote_super_admin_requires_platform_admin(monkeypatch):
     session.close()
 
     try:
-        with _client_with_auth(monkeypatch, SessionLocal, regular_sub) as client:
+        with _client_with_auth(monkeypatch, AsyncSessionLocal, regular_sub) as client:
             response = client.patch(
                 f"/auth/platform/users/{target_id}/promote",
                 headers=_auth_headers(),
@@ -244,12 +232,12 @@ def test_promote_super_admin_requires_platform_admin(monkeypatch):
             assert response.json()["detail"] == "Only platform administrators can promote user accounts"
     finally:
         app.dependency_overrides.clear()
-        Base.metadata.drop_all(engine)
+        Base.metadata.drop_all(sync_engine)
 
 
 def test_suspend_requires_platform_admin(monkeypatch):
-    engine, SessionLocal = _make_db()
-    session = SessionLocal()
+    sync_engine, SyncSession, async_engine, AsyncSessionLocal = _make_db()
+    session = SyncSession()
     regular_user = User(
         cognito_sub="regular-user-sub",
         email="regular@example.com",
@@ -270,7 +258,7 @@ def test_suspend_requires_platform_admin(monkeypatch):
     session.close()
 
     try:
-        with _client_with_auth(monkeypatch, SessionLocal, regular_sub) as client:
+        with _client_with_auth(monkeypatch, AsyncSessionLocal, regular_sub) as client:
             response = client.patch(
                 f"/auth/users/{target_id}/suspend",
                 headers=_auth_headers(),
@@ -279,15 +267,15 @@ def test_suspend_requires_platform_admin(monkeypatch):
             assert response.json()["detail"] == "Only platform administrators can suspend user accounts"
     finally:
         app.dependency_overrides.clear()
-        Base.metadata.drop_all(engine)
+        Base.metadata.drop_all(sync_engine)
 
 
 def test_suspend_rejects_self_target(monkeypatch):
-    engine, SessionLocal = _make_db()
-    admin_id, admin_sub, _ = _seed_users(SessionLocal)
+    sync_engine, SyncSession, async_engine, AsyncSessionLocal = _make_db()
+    admin_id, admin_sub, _ = _seed_users(SyncSession)
 
     try:
-        with _client_with_auth(monkeypatch, SessionLocal, admin_sub) as client:
+        with _client_with_auth(monkeypatch, AsyncSessionLocal, admin_sub) as client:
             response = client.patch(
                 f"/auth/users/{admin_id}/suspend",
                 headers=_auth_headers(),
@@ -296,12 +284,12 @@ def test_suspend_rejects_self_target(monkeypatch):
             assert response.json()["detail"] == "You cannot suspend your own account"
     finally:
         app.dependency_overrides.clear()
-        Base.metadata.drop_all(engine)
+        Base.metadata.drop_all(sync_engine)
 
 
 def test_unsuspend_requires_platform_admin(monkeypatch):
-    engine, SessionLocal = _make_db()
-    session = SessionLocal()
+    sync_engine, SyncSession, async_engine, AsyncSessionLocal = _make_db()
+    session = SyncSession()
     regular_user = User(
         cognito_sub="regular-unsuspend-sub",
         email="regular-unsuspend@example.com",
@@ -323,7 +311,7 @@ def test_unsuspend_requires_platform_admin(monkeypatch):
     session.close()
 
     try:
-        with _client_with_auth(monkeypatch, SessionLocal, regular_sub) as client:
+        with _client_with_auth(monkeypatch, AsyncSessionLocal, regular_sub) as client:
             response = client.patch(
                 f"/auth/users/{target_id}/unsuspend",
                 headers=_auth_headers(),
@@ -332,16 +320,16 @@ def test_unsuspend_requires_platform_admin(monkeypatch):
             assert response.json()["detail"] == "Only platform administrators can unsuspend user accounts"
     finally:
         app.dependency_overrides.clear()
-        Base.metadata.drop_all(engine)
+        Base.metadata.drop_all(sync_engine)
 
 
 def test_suspend_returns_404_for_missing_user(monkeypatch):
-    engine, SessionLocal = _make_db()
-    _, admin_sub, _ = _seed_users(SessionLocal)
+    sync_engine, SyncSession, async_engine, AsyncSessionLocal = _make_db()
+    _, admin_sub, _ = _seed_users(SyncSession)
     missing_user_id = str(uuid4())
 
     try:
-        with _client_with_auth(monkeypatch, SessionLocal, admin_sub) as client:
+        with _client_with_auth(monkeypatch, AsyncSessionLocal, admin_sub) as client:
             response = client.patch(
                 f"/auth/users/{missing_user_id}/suspend",
                 headers=_auth_headers(),
@@ -350,16 +338,16 @@ def test_suspend_returns_404_for_missing_user(monkeypatch):
             assert missing_user_id in response.json()["detail"]
     finally:
         app.dependency_overrides.clear()
-        Base.metadata.drop_all(engine)
+        Base.metadata.drop_all(sync_engine)
 
 
 def test_unsuspend_returns_404_for_missing_user(monkeypatch):
-    engine, SessionLocal = _make_db()
-    _, admin_sub, _ = _seed_users(SessionLocal)
+    sync_engine, SyncSession, async_engine, AsyncSessionLocal = _make_db()
+    _, admin_sub, _ = _seed_users(SyncSession)
     missing_user_id = str(uuid4())
 
     try:
-        with _client_with_auth(monkeypatch, SessionLocal, admin_sub) as client:
+        with _client_with_auth(monkeypatch, AsyncSessionLocal, admin_sub) as client:
             response = client.patch(
                 f"/auth/users/{missing_user_id}/unsuspend",
                 headers=_auth_headers(),
@@ -368,4 +356,4 @@ def test_unsuspend_returns_404_for_missing_user(monkeypatch):
             assert missing_user_id in response.json()["detail"]
     finally:
         app.dependency_overrides.clear()
-        Base.metadata.drop_all(engine)
+        Base.metadata.drop_all(sync_engine)

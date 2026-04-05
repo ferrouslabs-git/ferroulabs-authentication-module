@@ -4,7 +4,6 @@ from fastapi import APIRouter
 
 from ..config import get_settings
 from ..services.cookie_token_service import (
-	call_cognito_refresh,
 	call_cognito_refresh_async,
 	clear_csrf_cookie,
 	clear_refresh_cookie,

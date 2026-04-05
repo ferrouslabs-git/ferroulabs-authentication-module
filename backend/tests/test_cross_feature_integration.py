@@ -9,9 +9,6 @@ from unittest.mock import patch, MagicMock
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
 
 from app.auth_usermanagement.models.invitation import Invitation
 from app.auth_usermanagement.models.membership import Membership
@@ -30,24 +27,12 @@ from app.auth_usermanagement.services.user_service import (
     suspend_user,
     unsuspend_user,
 )
-from app.database import Base
 
 
 # ── Helpers ──────────────────────────────────────────────────────
 
 def _utc_now():
     return datetime.now(UTC).replace(tzinfo=None)
-
-
-def _make_db():
-    engine = create_engine(
-        "sqlite://",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
-    Base.metadata.create_all(engine)
-    SessionLocal = sessionmaker(bind=engine)
-    return engine, SessionLocal
 
 
 def _seed_tenant_and_users(session, n_users=2):
@@ -73,299 +58,258 @@ def _seed_tenant_and_users(session, n_users=2):
 
 
 class TestInvitationAcceptanceFlow:
-    def test_full_invitation_to_membership(self):
+    @pytest.mark.asyncio
+    async def test_full_invitation_to_membership(self, dual_session):
         """Create invitation, look up by token, accept it, verify membership."""
-        engine, SessionLocal = _make_db()
-        try:
-            session = SessionLocal()
-            tenant, users = _seed_tenant_and_users(session)
-            inviter, invitee = users[0], users[1]
+        sync_db, async_db = dual_session
+        tenant, users = _seed_tenant_and_users(sync_db)
+        inviter, invitee = users[0], users[1]
 
-            # Inviter creates invitation for invitee
-            invitation, raw_token = create_invitation(
-                db=session,
-                tenant_id=tenant.id,
-                email=invitee.email,
-                role="member",
-                created_by=inviter.id,
-                target_scope_type="account",
-                target_scope_id=tenant.id,
-            )
-            assert invitation.status == "pending"
+        # Inviter creates invitation for invitee
+        invitation, raw_token = await create_invitation(
+            db=async_db,
+            tenant_id=tenant.id,
+            email=invitee.email,
+            role="member",
+            created_by=inviter.id,
+            target_scope_type="account",
+            target_scope_id=tenant.id,
+        )
+        assert invitation.status == "pending"
 
-            # Look up by token
-            found = get_invitation_by_token(session, raw_token)
-            assert found is not None
-            assert found.id == invitation.id
+        # Look up by token
+        found = await get_invitation_by_token(async_db, raw_token)
+        assert found is not None
+        assert found.id == invitation.id
 
-            # Accept
-            membership = accept_invitation(session, found, invitee)
-            assert membership.user_id == invitee.id
-            assert membership.scope_type == "account"
-            assert membership.scope_id == tenant.id
-            assert membership.status == "active"
+        # Accept
+        membership = await accept_invitation(async_db, found, invitee)
+        assert membership.user_id == invitee.id
+        assert membership.scope_type == "account"
+        assert membership.scope_id == tenant.id
+        assert membership.status == "active"
 
-            # Invitation is now accepted
-            session.refresh(invitation)
-            assert invitation.status == "accepted"
-        finally:
-            session.close()
-            Base.metadata.drop_all(engine)
+        # Invitation is now accepted
+        await async_db.refresh(invitation)
+        assert invitation.status == "accepted"
 
-    def test_accept_invitation_rejects_expired(self):
-        engine, SessionLocal = _make_db()
-        try:
-            session = SessionLocal()
-            tenant, users = _seed_tenant_and_users(session)
+    @pytest.mark.asyncio
+    async def test_accept_invitation_rejects_expired(self, dual_session):
+        sync_db, async_db = dual_session
+        tenant, users = _seed_tenant_and_users(sync_db)
 
-            invitation, raw_token = create_invitation(
-                db=session,
-                tenant_id=tenant.id,
-                email=users[1].email,
-                role="member",
-                created_by=users[0].id,
-                expires_in_days=0,  # Already expired
-            )
-            # Force expiration
-            invitation.expires_at = _utc_now() - timedelta(hours=1)
-            session.commit()
+        invitation, raw_token = await create_invitation(
+            db=async_db,
+            tenant_id=tenant.id,
+            email=users[1].email,
+            role="member",
+            created_by=users[0].id,
+            expires_in_days=0,  # Already expired
+        )
+        # Force expiration
+        invitation.expires_at = _utc_now() - timedelta(hours=1)
+        await async_db.commit()
 
-            with pytest.raises(ValueError, match="expired"):
-                accept_invitation(session, invitation, users[1])
-        finally:
-            session.close()
-            Base.metadata.drop_all(engine)
+        with pytest.raises(ValueError, match="expired"):
+            await accept_invitation(async_db, invitation, users[1])
 
-    def test_accept_invitation_email_mismatch(self):
-        engine, SessionLocal = _make_db()
-        try:
-            session = SessionLocal()
-            tenant, users = _seed_tenant_and_users(session)
+    @pytest.mark.asyncio
+    async def test_accept_invitation_email_mismatch(self, dual_session):
+        sync_db, async_db = dual_session
+        tenant, users = _seed_tenant_and_users(sync_db)
 
-            invitation, _ = create_invitation(
-                db=session,
-                tenant_id=tenant.id,
-                email="other@example.com",
-                role="member",
-                created_by=users[0].id,
-            )
+        invitation, _ = await create_invitation(
+            db=async_db,
+            tenant_id=tenant.id,
+            email="other@example.com",
+            role="member",
+            created_by=users[0].id,
+        )
 
-            with pytest.raises(PermissionError, match="does not match"):
-                accept_invitation(session, invitation, users[1])
-        finally:
-            session.close()
-            Base.metadata.drop_all(engine)
+        with pytest.raises(PermissionError, match="does not match"):
+            await accept_invitation(async_db, invitation, users[1])
 
-    def test_accept_invitation_double_accept(self):
-        engine, SessionLocal = _make_db()
-        try:
-            session = SessionLocal()
-            tenant, users = _seed_tenant_and_users(session)
+    @pytest.mark.asyncio
+    async def test_accept_invitation_double_accept(self, dual_session):
+        sync_db, async_db = dual_session
+        tenant, users = _seed_tenant_and_users(sync_db)
 
-            invitation, _ = create_invitation(
-                db=session,
-                tenant_id=tenant.id,
-                email=users[1].email,
-                role="member",
-                created_by=users[0].id,
-            )
-            accept_invitation(session, invitation, users[1])
+        invitation, _ = await create_invitation(
+            db=async_db,
+            tenant_id=tenant.id,
+            email=users[1].email,
+            role="member",
+            created_by=users[0].id,
+        )
+        await accept_invitation(async_db, invitation, users[1])
 
-            with pytest.raises(ValueError, match="already been accepted"):
-                accept_invitation(session, invitation, users[1])
-        finally:
-            session.close()
-            Base.metadata.drop_all(engine)
+        with pytest.raises(ValueError, match="already been accepted"):
+            await accept_invitation(async_db, invitation, users[1])
 
-    def test_new_invitation_revokes_previous_pending(self):
+    @pytest.mark.asyncio
+    async def test_new_invitation_revokes_previous_pending(self, dual_session):
         """Creating a new invitation for the same email should revoke old pending ones."""
-        engine, SessionLocal = _make_db()
-        try:
-            session = SessionLocal()
-            tenant, users = _seed_tenant_and_users(session)
+        sync_db, async_db = dual_session
+        tenant, users = _seed_tenant_and_users(sync_db)
 
-            inv1, tok1 = create_invitation(
-                db=session, tenant_id=tenant.id, email=users[1].email,
-                role="member", created_by=users[0].id,
-            )
-            inv2, tok2 = create_invitation(
-                db=session, tenant_id=tenant.id, email=users[1].email,
-                role="admin", created_by=users[0].id,
-            )
+        inv1, tok1 = await create_invitation(
+            db=async_db, tenant_id=tenant.id, email=users[1].email,
+            role="member", created_by=users[0].id,
+        )
+        inv2, tok2 = await create_invitation(
+            db=async_db, tenant_id=tenant.id, email=users[1].email,
+            role="admin", created_by=users[0].id,
+        )
 
-            session.refresh(inv1)
-            assert inv1.status == "revoked" or inv1.status == "expired"
-            assert inv2.status == "pending"
-        finally:
-            session.close()
-            Base.metadata.drop_all(engine)
+        await async_db.refresh(inv1)
+        assert inv1.status == "revoked" or inv1.status == "expired"
+        assert inv2.status == "pending"
 
 
 # ── Space invitation + membership ────────────────────────────────
 
 
 class TestSpaceInvitationFlow:
-    def test_space_invitation_creates_space_membership(self):
-        engine, SessionLocal = _make_db()
-        try:
-            session = SessionLocal()
-            tenant, users = _seed_tenant_and_users(session)
+    @pytest.mark.asyncio
+    async def test_space_invitation_creates_space_membership(self, dual_session):
+        sync_db, async_db = dual_session
+        tenant, users = _seed_tenant_and_users(sync_db)
 
-            space = create_space(session, "Dev Team", tenant.id, users[0].id)
+        space = await create_space(async_db, "Dev Team", tenant.id, users[0].id)
 
-            invitation, raw_token = create_invitation(
-                db=session,
-                tenant_id=tenant.id,
-                email=users[1].email,
-                role="member",
-                created_by=users[0].id,
-                target_scope_type="space",
-                target_scope_id=space.id,
-                target_role_name="space_member",
-            )
+        invitation, raw_token = await create_invitation(
+            db=async_db,
+            tenant_id=tenant.id,
+            email=users[1].email,
+            role="member",
+            created_by=users[0].id,
+            target_scope_type="space",
+            target_scope_id=space.id,
+            target_role_name="space_member",
+        )
 
-            membership = accept_invitation(session, invitation, users[1])
-            assert membership.scope_type == "space"
-            assert membership.scope_id == space.id
-            assert membership.role_name == "space_member"
-        finally:
-            session.close()
-            Base.metadata.drop_all(engine)
+        membership = await accept_invitation(async_db, invitation, users[1])
+        assert membership.scope_type == "space"
+        assert membership.scope_id == space.id
+        assert membership.role_name == "space_member"
 
 
 # ── Suspended user rejection ────────────────────────────────────
 
 
 class TestSuspendedUserBehavior:
+    @pytest.mark.asyncio
     @patch("app.auth_usermanagement.services.user_service._cognito_global_sign_out")
-    def test_suspend_then_unsuspend_user(self, mock_signout):
-        engine, SessionLocal = _make_db()
-        try:
-            session = SessionLocal()
-            user = User(cognito_sub="susp-sub", email="susp@test.com", name="Susp")
-            session.add(user)
-            session.commit()
+    async def test_suspend_then_unsuspend_user(self, mock_signout, dual_session):
+        sync_db, async_db = dual_session
+        user = User(cognito_sub="susp-sub", email="susp@test.com", name="Susp")
+        sync_db.add(user)
+        sync_db.commit()
 
-            suspended = suspend_user(user.id, session)
-            assert suspended.is_active is False
-            assert suspended.suspended_at is not None
-            mock_signout.assert_called_once()
+        suspended = await suspend_user(user.id, async_db)
+        assert suspended.is_active is False
+        assert suspended.suspended_at is not None
+        mock_signout.assert_called_once()
 
-            unsuspended = unsuspend_user(user.id, session)
-            assert unsuspended.is_active is True
-        finally:
-            session.close()
-            Base.metadata.drop_all(engine)
+        unsuspended = await unsuspend_user(user.id, async_db)
+        assert unsuspended.is_active is True
 
+    @pytest.mark.asyncio
     @patch("app.auth_usermanagement.services.user_service._cognito_global_sign_out")
-    def test_suspend_user_not_found(self, mock_signout):
-        engine, SessionLocal = _make_db()
-        try:
-            session = SessionLocal()
-            with pytest.raises(ValueError, match="not found"):
-                suspend_user(uuid4(), session)
-        finally:
-            session.close()
-            Base.metadata.drop_all(engine)
+    async def test_suspend_user_not_found(self, mock_signout, dual_session):
+        sync_db, async_db = dual_session
+        with pytest.raises(ValueError, match="not found"):
+            await suspend_user(uuid4(), async_db)
 
 
 # ── Tenant deletion cascade ─────────────────────────────────────
 
 
 class TestTenantDeletionCascade:
-    def test_deleting_tenant_cascades_invitations(self):
+    @pytest.mark.asyncio
+    async def test_deleting_tenant_cascades_invitations(self, dual_session):
         """When a tenant is deleted, its invitations should cascade-delete."""
-        engine, SessionLocal = _make_db()
-        try:
-            session = SessionLocal()
-            tenant, users = _seed_tenant_and_users(session, n_users=1)
+        sync_db, async_db = dual_session
+        tenant, users = _seed_tenant_and_users(sync_db, n_users=1)
 
-            create_invitation(
-                db=session, tenant_id=tenant.id, email="cascade@test.com",
-                role="member", created_by=users[0].id,
-            )
-            assert session.query(Invitation).count() == 1
+        await create_invitation(
+            db=async_db, tenant_id=tenant.id, email="cascade@test.com",
+            role="member", created_by=users[0].id,
+        )
+        await async_db.commit()
 
-            session.delete(tenant)
-            session.commit()
+        sync_db.expire_all()
+        assert sync_db.query(Invitation).count() == 1
 
-            assert session.query(Invitation).count() == 0
-        finally:
-            session.close()
-            Base.metadata.drop_all(engine)
+        sync_db.delete(tenant)
+        sync_db.commit()
+
+        assert sync_db.query(Invitation).count() == 0
 
 
 # ── Membership re-invite does not downgrade ──────────────────────
 
 
 class TestMembershipNoDowngrade:
-    def test_accepting_lower_role_keeps_higher_role(self):
+    @pytest.mark.asyncio
+    async def test_accepting_lower_role_keeps_higher_role(self, dual_session):
         """
         If user already has account_admin, accepting an account_member
         invite should NOT downgrade them.
         """
-        engine, SessionLocal = _make_db()
-        try:
-            session = SessionLocal()
-            tenant, users = _seed_tenant_and_users(session)
+        sync_db, async_db = dual_session
+        tenant, users = _seed_tenant_and_users(sync_db)
 
-            # Give user1 an existing admin membership
-            session.add(Membership(
-                user_id=users[1].id, scope_type="account",
-                scope_id=tenant.id, role_name="account_admin", status="active",
-            ))
-            session.commit()
+        # Give user1 an existing admin membership
+        sync_db.add(Membership(
+            user_id=users[1].id, scope_type="account",
+            scope_id=tenant.id, role_name="account_admin", status="active",
+        ))
+        sync_db.commit()
 
-            # Create a "member" invitation for the same user
-            invitation, _ = create_invitation(
-                db=session, tenant_id=tenant.id, email=users[1].email,
-                role="member", created_by=users[0].id,
-                target_role_name="account_member",
-            )
+        # Create a "member" invitation for the same user
+        invitation, _ = await create_invitation(
+            db=async_db, tenant_id=tenant.id, email=users[1].email,
+            role="member", created_by=users[0].id,
+            target_role_name="account_member",
+        )
 
-            membership = accept_invitation(session, invitation, users[1])
-            # account_member perms are a subset of account_admin,
-            # so the role should stay account_admin
-            assert membership.role_name == "account_admin"
-            assert membership.status == "active"
-        finally:
-            session.close()
-            Base.metadata.drop_all(engine)
+        membership = await accept_invitation(async_db, invitation, users[1])
+        # account_member perms are a subset of account_admin,
+        # so the role should stay account_admin
+        assert membership.role_name == "account_admin"
+        assert membership.status == "active"
 
 
 # ── User deletion cascade ───────────────────────────────────────
 
 
 class TestUserDeletionCascade:
+    @pytest.mark.asyncio
     @patch("app.auth_usermanagement.services.cognito_admin_service.admin_delete_user")
-    def test_delete_user_removes_memberships_and_sessions(self, mock_cognito):
+    async def test_delete_user_removes_memberships_and_sessions(self, mock_cognito, dual_session):
         from app.auth_usermanagement.services.user_service import delete_user
 
         mock_cognito.return_value = {"deleted": True}
-        engine, SessionLocal = _make_db()
-        try:
-            session = SessionLocal()
-            tenant = Tenant(name="DelCo")
-            user = User(cognito_sub="del-c-sub", email="delc@test.com", name="Del")
-            session.add_all([tenant, user])
-            session.commit()
+        sync_db, async_db = dual_session
+        tenant = Tenant(name="DelCo")
+        user = User(cognito_sub="del-c-sub", email="delc@test.com", name="Del")
+        sync_db.add_all([tenant, user])
+        sync_db.commit()
 
-            session.add(Membership(
-                user_id=user.id, scope_type="account", scope_id=tenant.id,
-                role_name="account_member", status="active",
-            ))
-            session.add(AuthSession(user_id=user.id, refresh_token_hash="hash123"))
-            session.commit()
-            uid = user.id
-            session.close()
+        sync_db.add(Membership(
+            user_id=user.id, scope_type="account", scope_id=tenant.id,
+            role_name="account_member", status="active",
+        ))
+        sync_db.add(AuthSession(user_id=user.id, refresh_token_hash="hash123"))
+        sync_db.commit()
+        uid = user.id
 
-            session = SessionLocal()
-            result = delete_user(uid, session)
-            assert result["deleted"] is True
+        result = await delete_user(uid, async_db)
+        assert result["deleted"] is True
+        await async_db.commit()
 
-            assert session.query(User).filter(User.id == uid).first() is None
-            assert session.query(Membership).filter(Membership.user_id == uid).count() == 0
-            assert session.query(AuthSession).filter(AuthSession.user_id == uid).count() == 0
-        finally:
-            session.close()
-            Base.metadata.drop_all(engine)
+        sync_db.expire_all()
+        assert sync_db.query(User).filter(User.id == uid).first() is None
+        assert sync_db.query(Membership).filter(Membership.user_id == uid).count() == 0
+        assert sync_db.query(AuthSession).filter(AuthSession.user_id == uid).count() == 0

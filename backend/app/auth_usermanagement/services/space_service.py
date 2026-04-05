@@ -4,7 +4,8 @@ Space service — create, list, suspend/unsuspend spaces.
 from datetime import datetime, UTC
 from uuid import UUID
 
-from sqlalchemy.orm import Session
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models.membership import Membership
 from ..models.space import Space
@@ -14,8 +15,8 @@ def _utc_now() -> datetime:
     return datetime.now(UTC).replace(tzinfo=None)
 
 
-def create_space(
-    db: Session,
+async def create_space(
+    db: AsyncSession,
     name: str,
     account_id: UUID | None,
     creator_user_id: UUID,
@@ -23,7 +24,7 @@ def create_space(
     """Create a space and grant the creator a space_admin membership."""
     space = Space(name=name, account_id=account_id)
     db.add(space)
-    db.flush()  # populate space.id
+    await db.flush()  # populate space.id
 
     membership = Membership(
         user_id=creator_user_id,
@@ -34,80 +35,84 @@ def create_space(
         granted_by=creator_user_id,
     )
     db.add(membership)
-    db.commit()
-    db.refresh(space)
+    await db.commit()
+    await db.refresh(space)
     return space
 
 
-def list_user_spaces(db: Session, user_id: UUID) -> list[Space]:
+async def list_user_spaces(db: AsyncSession, user_id: UUID) -> list[Space]:
     """Return all spaces where the user has an active membership."""
-    space_ids = (
-        db.query(Membership.scope_id)
-        .filter(
+    space_ids_subq = (
+        select(Membership.scope_id)
+        .where(
             Membership.user_id == user_id,
             Membership.scope_type == "space",
             Membership.status == "active",
         )
         .scalar_subquery()
     )
-    return (
-        db.query(Space)
-        .filter(Space.id.in_(space_ids))
+    result = await db.execute(
+        select(Space)
+        .where(Space.id.in_(space_ids_subq))
         .order_by(Space.created_at.desc())
-        .all()
     )
+    return list(result.scalars().all())
 
 
-def list_account_spaces(db: Session, account_id: UUID) -> list[Space]:
+async def list_account_spaces(db: AsyncSession, account_id: UUID) -> list[Space]:
     """Return all spaces belonging to a given account."""
-    return (
-        db.query(Space)
-        .filter(Space.account_id == account_id)
+    result = await db.execute(
+        select(Space)
+        .where(Space.account_id == account_id)
         .order_by(Space.created_at.desc())
-        .all()
     )
+    return list(result.scalars().all())
 
 
-def suspend_space(db: Session, space_id: UUID) -> Space:
+async def suspend_space(db: AsyncSession, space_id: UUID) -> Space:
     """Suspend a space. Raises ValueError if already suspended."""
-    space = db.query(Space).filter(Space.id == space_id).first()
+    result = await db.execute(select(Space).where(Space.id == space_id))
+    space = result.scalar_one_or_none()
     if space is None:
         raise ValueError("Space not found")
     if space.status == "suspended":
         raise ValueError("Space is already suspended")
     space.status = "suspended"
     space.suspended_at = _utc_now()
-    db.commit()
-    db.refresh(space)
+    await db.commit()
+    await db.refresh(space)
     return space
 
 
-def unsuspend_space(db: Session, space_id: UUID) -> Space:
+async def unsuspend_space(db: AsyncSession, space_id: UUID) -> Space:
     """Unsuspend a space. Raises ValueError if not currently suspended."""
-    space = db.query(Space).filter(Space.id == space_id).first()
+    result = await db.execute(select(Space).where(Space.id == space_id))
+    space = result.scalar_one_or_none()
     if space is None:
         raise ValueError("Space not found")
     if space.status != "suspended":
         raise ValueError("Space is not suspended")
     space.status = "active"
     space.suspended_at = None
-    db.commit()
-    db.refresh(space)
+    await db.commit()
+    await db.refresh(space)
     return space
 
 
-def get_space_by_id(db: Session, space_id: UUID) -> Space | None:
+async def get_space_by_id(db: AsyncSession, space_id: UUID) -> Space | None:
     """Get a space by ID."""
-    return db.query(Space).filter(Space.id == space_id).first()
+    result = await db.execute(select(Space).where(Space.id == space_id))
+    return result.scalar_one_or_none()
 
 
-def update_space(db: Session, space_id: UUID, *, name: str | None = None) -> Space:
+async def update_space(db: AsyncSession, space_id: UUID, *, name: str | None = None) -> Space:
     """Update mutable space fields."""
-    space = db.query(Space).filter(Space.id == space_id).first()
+    result = await db.execute(select(Space).where(Space.id == space_id))
+    space = result.scalar_one_or_none()
     if space is None:
         raise ValueError("Space not found")
     if name is not None:
         space.name = name
-    db.commit()
-    db.refresh(space)
+    await db.commit()
+    await db.refresh(space)
     return space

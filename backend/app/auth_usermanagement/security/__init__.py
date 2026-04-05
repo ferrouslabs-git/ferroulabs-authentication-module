@@ -8,7 +8,7 @@ Includes:
 - Permission-based authorization guards (v3.0)
 - Deprecated role-based guards (remove after 2026-05-20)
 """
-from .jwt_verifier import verify_token, verify_token_async, verify_token_optional, InvalidTokenError
+from .jwt_verifier import verify_token, verify_token_async, verify_token_optional, verify_token_optional_async, InvalidTokenError
 from .dependencies import get_current_user, get_current_user_optional, oauth2_scheme, get_tenant_context, get_scope_context
 from .tenant_context import TenantContext
 from .scope_context import ScopeContext
@@ -33,7 +33,9 @@ from .guards import (
 
 __all__ = [
     "verify_token",
+    "verify_token_async",
     "verify_token_optional",
+    "verify_token_optional_async",
     "InvalidTokenError",
     "get_current_user",
     "get_current_user_optional",

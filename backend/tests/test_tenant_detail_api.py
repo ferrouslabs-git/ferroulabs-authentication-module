@@ -6,9 +6,6 @@ from types import SimpleNamespace
 from uuid import uuid4
 
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
 
 from app.auth_usermanagement.models.invitation import Invitation
 from app.auth_usermanagement.models.membership import Membership
@@ -17,25 +14,19 @@ from app.auth_usermanagement.models.user import User
 from app.auth_usermanagement.security import dependencies as security_dependencies
 from app.database import Base, get_db
 from app.main import app
+from tests.async_test_utils import make_test_db, make_async_app
 
 
 def _make_db():
-    engine = create_engine(
-        "sqlite://",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
-    Base.metadata.create_all(engine)
-    SessionLocal = sessionmaker(bind=engine)
-    return engine, SessionLocal
+    return make_test_db()
 
 
 def _utc_now():
     return datetime.now(UTC).replace(tzinfo=None)
 
 
-def _seed(SessionLocal):
-    session = SessionLocal()
+def _seed(SyncSession):
+    session = SyncSession()
 
     admin = User(
         cognito_sub="admin-sub",
@@ -121,13 +112,10 @@ def _seed(SessionLocal):
     return ids
 
 
-def _client(monkeypatch, SessionLocal, user_sub):
-    def _override_get_db():
-        db = SessionLocal()
-        try:
-            yield db
-        finally:
-            db.close()
+def _client(monkeypatch, AsyncSessionLocal, user_sub):
+    async def _override_get_db():
+        async with AsyncSessionLocal() as session:
+            yield session
 
     monkeypatch.setattr(
         security_dependencies,
@@ -147,10 +135,10 @@ def _headers():
 
 class TestGetTenantDetail:
     def test_owner_can_get_tenant_detail(self, monkeypatch):
-        engine, SessionLocal = _make_db()
-        ids = _seed(SessionLocal)
+        sync_engine, SyncSession, async_engine, AsyncSessionLocal = _make_db()
+        ids = _seed(SyncSession)
         try:
-            with _client(monkeypatch, SessionLocal, ids["owner_sub"]) as c:
+            with _client(monkeypatch, AsyncSessionLocal, ids["owner_sub"]) as c:
                 r = c.get(f"/auth/tenants/{ids['tenant_id']}", headers=_headers())
                 assert r.status_code == 200
                 data = r.json()
@@ -161,41 +149,41 @@ class TestGetTenantDetail:
                 assert "updated_at" in data
         finally:
             app.dependency_overrides.clear()
-            Base.metadata.drop_all(engine)
+            Base.metadata.drop_all(sync_engine)
 
     def test_platform_admin_can_get_any_tenant(self, monkeypatch):
-        engine, SessionLocal = _make_db()
-        ids = _seed(SessionLocal)
+        sync_engine, SyncSession, async_engine, AsyncSessionLocal = _make_db()
+        ids = _seed(SyncSession)
         try:
-            with _client(monkeypatch, SessionLocal, ids["admin_sub"]) as c:
+            with _client(monkeypatch, AsyncSessionLocal, ids["admin_sub"]) as c:
                 r = c.get(f"/auth/tenants/{ids['tenant_id']}", headers=_headers())
                 assert r.status_code == 200
                 assert r.json()["name"] == "Acme"
         finally:
             app.dependency_overrides.clear()
-            Base.metadata.drop_all(engine)
+            Base.metadata.drop_all(sync_engine)
 
     def test_outsider_cannot_get_tenant(self, monkeypatch):
-        engine, SessionLocal = _make_db()
-        ids = _seed(SessionLocal)
+        sync_engine, SyncSession, async_engine, AsyncSessionLocal = _make_db()
+        ids = _seed(SyncSession)
         try:
-            with _client(monkeypatch, SessionLocal, ids["outsider_sub"]) as c:
+            with _client(monkeypatch, AsyncSessionLocal, ids["outsider_sub"]) as c:
                 r = c.get(f"/auth/tenants/{ids['tenant_id']}", headers=_headers())
                 assert r.status_code == 403
         finally:
             app.dependency_overrides.clear()
-            Base.metadata.drop_all(engine)
+            Base.metadata.drop_all(sync_engine)
 
     def test_get_nonexistent_tenant_returns_404(self, monkeypatch):
-        engine, SessionLocal = _make_db()
-        ids = _seed(SessionLocal)
+        sync_engine, SyncSession, async_engine, AsyncSessionLocal = _make_db()
+        ids = _seed(SyncSession)
         try:
-            with _client(monkeypatch, SessionLocal, ids["admin_sub"]) as c:
+            with _client(monkeypatch, AsyncSessionLocal, ids["admin_sub"]) as c:
                 r = c.get(f"/auth/tenants/{uuid4()}", headers=_headers())
                 assert r.status_code == 404
         finally:
             app.dependency_overrides.clear()
-            Base.metadata.drop_all(engine)
+            Base.metadata.drop_all(sync_engine)
 
 
 # ── PATCH /tenants/{tenant_id} ──────────────────────────────────
@@ -203,10 +191,10 @@ class TestGetTenantDetail:
 
 class TestUpdateTenant:
     def test_owner_can_update_tenant_name(self, monkeypatch):
-        engine, SessionLocal = _make_db()
-        ids = _seed(SessionLocal)
+        sync_engine, SyncSession, async_engine, AsyncSessionLocal = _make_db()
+        ids = _seed(SyncSession)
         try:
-            with _client(monkeypatch, SessionLocal, ids["owner_sub"]) as c:
+            with _client(monkeypatch, AsyncSessionLocal, ids["owner_sub"]) as c:
                 r = c.patch(
                     f"/auth/tenants/{ids['tenant_id']}",
                     json={"name": "Acme Corp"},
@@ -217,13 +205,13 @@ class TestUpdateTenant:
                 assert r.json()["plan"] == "pro"  # unchanged
         finally:
             app.dependency_overrides.clear()
-            Base.metadata.drop_all(engine)
+            Base.metadata.drop_all(sync_engine)
 
     def test_owner_can_update_plan(self, monkeypatch):
-        engine, SessionLocal = _make_db()
-        ids = _seed(SessionLocal)
+        sync_engine, SyncSession, async_engine, AsyncSessionLocal = _make_db()
+        ids = _seed(SyncSession)
         try:
-            with _client(monkeypatch, SessionLocal, ids["owner_sub"]) as c:
+            with _client(monkeypatch, AsyncSessionLocal, ids["owner_sub"]) as c:
                 r = c.patch(
                     f"/auth/tenants/{ids['tenant_id']}",
                     json={"plan": "enterprise"},
@@ -233,13 +221,13 @@ class TestUpdateTenant:
                 assert r.json()["plan"] == "enterprise"
         finally:
             app.dependency_overrides.clear()
-            Base.metadata.drop_all(engine)
+            Base.metadata.drop_all(sync_engine)
 
     def test_member_cannot_update_tenant(self, monkeypatch):
-        engine, SessionLocal = _make_db()
-        ids = _seed(SessionLocal)
+        sync_engine, SyncSession, async_engine, AsyncSessionLocal = _make_db()
+        ids = _seed(SyncSession)
         try:
-            with _client(monkeypatch, SessionLocal, ids["member_sub"]) as c:
+            with _client(monkeypatch, AsyncSessionLocal, ids["member_sub"]) as c:
                 r = c.patch(
                     f"/auth/tenants/{ids['tenant_id']}",
                     json={"name": "Hacked"},
@@ -248,13 +236,13 @@ class TestUpdateTenant:
                 assert r.status_code == 403
         finally:
             app.dependency_overrides.clear()
-            Base.metadata.drop_all(engine)
+            Base.metadata.drop_all(sync_engine)
 
     def test_platform_admin_can_update_any_tenant(self, monkeypatch):
-        engine, SessionLocal = _make_db()
-        ids = _seed(SessionLocal)
+        sync_engine, SyncSession, async_engine, AsyncSessionLocal = _make_db()
+        ids = _seed(SyncSession)
         try:
-            with _client(monkeypatch, SessionLocal, ids["admin_sub"]) as c:
+            with _client(monkeypatch, AsyncSessionLocal, ids["admin_sub"]) as c:
                 r = c.patch(
                     f"/auth/tenants/{ids['tenant_id']}",
                     json={"name": "Admin Renamed"},
@@ -264,13 +252,13 @@ class TestUpdateTenant:
                 assert r.json()["name"] == "Admin Renamed"
         finally:
             app.dependency_overrides.clear()
-            Base.metadata.drop_all(engine)
+            Base.metadata.drop_all(sync_engine)
 
     def test_empty_update_rejected(self, monkeypatch):
-        engine, SessionLocal = _make_db()
-        ids = _seed(SessionLocal)
+        sync_engine, SyncSession, async_engine, AsyncSessionLocal = _make_db()
+        ids = _seed(SyncSession)
         try:
-            with _client(monkeypatch, SessionLocal, ids["owner_sub"]) as c:
+            with _client(monkeypatch, AsyncSessionLocal, ids["owner_sub"]) as c:
                 r = c.patch(
                     f"/auth/tenants/{ids['tenant_id']}",
                     json={},
@@ -279,7 +267,7 @@ class TestUpdateTenant:
                 assert r.status_code == 400
         finally:
             app.dependency_overrides.clear()
-            Base.metadata.drop_all(engine)
+            Base.metadata.drop_all(sync_engine)
 
 
 # ── GET /tenants/{tenant_id}/invitations ─────────────────────────
@@ -287,10 +275,10 @@ class TestUpdateTenant:
 
 class TestListTenantInvitations:
     def test_member_can_list_invitations(self, monkeypatch):
-        engine, SessionLocal = _make_db()
-        ids = _seed(SessionLocal)
+        sync_engine, SyncSession, async_engine, AsyncSessionLocal = _make_db()
+        ids = _seed(SyncSession)
         try:
-            with _client(monkeypatch, SessionLocal, ids["member_sub"]) as c:
+            with _client(monkeypatch, AsyncSessionLocal, ids["member_sub"]) as c:
                 r = c.get(f"/auth/tenants/{ids['tenant_id']}/invitations", headers=_headers())
                 assert r.status_code == 200
                 data = r.json()
@@ -300,13 +288,13 @@ class TestListTenantInvitations:
                 assert "accepted@example.com" in emails
         finally:
             app.dependency_overrides.clear()
-            Base.metadata.drop_all(engine)
+            Base.metadata.drop_all(sync_engine)
 
     def test_filter_by_status_pending(self, monkeypatch):
-        engine, SessionLocal = _make_db()
-        ids = _seed(SessionLocal)
+        sync_engine, SyncSession, async_engine, AsyncSessionLocal = _make_db()
+        ids = _seed(SyncSession)
         try:
-            with _client(monkeypatch, SessionLocal, ids["owner_sub"]) as c:
+            with _client(monkeypatch, AsyncSessionLocal, ids["owner_sub"]) as c:
                 r = c.get(
                     f"/auth/tenants/{ids['tenant_id']}/invitations?status=pending",
                     headers=_headers(),
@@ -318,13 +306,13 @@ class TestListTenantInvitations:
                 assert data[0]["status"] == "pending"
         finally:
             app.dependency_overrides.clear()
-            Base.metadata.drop_all(engine)
+            Base.metadata.drop_all(sync_engine)
 
     def test_filter_by_status_accepted(self, monkeypatch):
-        engine, SessionLocal = _make_db()
-        ids = _seed(SessionLocal)
+        sync_engine, SyncSession, async_engine, AsyncSessionLocal = _make_db()
+        ids = _seed(SyncSession)
         try:
-            with _client(monkeypatch, SessionLocal, ids["owner_sub"]) as c:
+            with _client(monkeypatch, AsyncSessionLocal, ids["owner_sub"]) as c:
                 r = c.get(
                     f"/auth/tenants/{ids['tenant_id']}/invitations?status=accepted",
                     headers=_headers(),
@@ -335,18 +323,18 @@ class TestListTenantInvitations:
                 assert data[0]["email"] == "accepted@example.com"
         finally:
             app.dependency_overrides.clear()
-            Base.metadata.drop_all(engine)
+            Base.metadata.drop_all(sync_engine)
 
     def test_outsider_cannot_list_invitations(self, monkeypatch):
-        engine, SessionLocal = _make_db()
-        ids = _seed(SessionLocal)
+        sync_engine, SyncSession, async_engine, AsyncSessionLocal = _make_db()
+        ids = _seed(SyncSession)
         try:
-            with _client(monkeypatch, SessionLocal, ids["outsider_sub"]) as c:
+            with _client(monkeypatch, AsyncSessionLocal, ids["outsider_sub"]) as c:
                 r = c.get(f"/auth/tenants/{ids['tenant_id']}/invitations", headers=_headers())
                 assert r.status_code == 403
         finally:
             app.dependency_overrides.clear()
-            Base.metadata.drop_all(engine)
+            Base.metadata.drop_all(sync_engine)
 
 
 # ── GET /platform/users/{user_id} ───────────────────────────────
@@ -354,10 +342,10 @@ class TestListTenantInvitations:
 
 class TestGetPlatformUserDetail:
     def test_platform_admin_can_get_user_detail(self, monkeypatch):
-        engine, SessionLocal = _make_db()
-        ids = _seed(SessionLocal)
+        sync_engine, SyncSession, async_engine, AsyncSessionLocal = _make_db()
+        ids = _seed(SyncSession)
         try:
-            with _client(monkeypatch, SessionLocal, ids["admin_sub"]) as c:
+            with _client(monkeypatch, AsyncSessionLocal, ids["admin_sub"]) as c:
                 r = c.get(f"/auth/platform/users/{ids['owner_id']}", headers=_headers())
                 assert r.status_code == 200
                 data = r.json()
@@ -368,26 +356,26 @@ class TestGetPlatformUserDetail:
                 assert acme_m["tenant_name"] == "Acme"
         finally:
             app.dependency_overrides.clear()
-            Base.metadata.drop_all(engine)
+            Base.metadata.drop_all(sync_engine)
 
     def test_non_admin_cannot_get_user_detail(self, monkeypatch):
-        engine, SessionLocal = _make_db()
-        ids = _seed(SessionLocal)
+        sync_engine, SyncSession, async_engine, AsyncSessionLocal = _make_db()
+        ids = _seed(SyncSession)
         try:
-            with _client(monkeypatch, SessionLocal, ids["member_sub"]) as c:
+            with _client(monkeypatch, AsyncSessionLocal, ids["member_sub"]) as c:
                 r = c.get(f"/auth/platform/users/{ids['owner_id']}", headers=_headers())
                 assert r.status_code == 403
         finally:
             app.dependency_overrides.clear()
-            Base.metadata.drop_all(engine)
+            Base.metadata.drop_all(sync_engine)
 
     def test_get_nonexistent_user_returns_404(self, monkeypatch):
-        engine, SessionLocal = _make_db()
-        ids = _seed(SessionLocal)
+        sync_engine, SyncSession, async_engine, AsyncSessionLocal = _make_db()
+        ids = _seed(SyncSession)
         try:
-            with _client(monkeypatch, SessionLocal, ids["admin_sub"]) as c:
+            with _client(monkeypatch, AsyncSessionLocal, ids["admin_sub"]) as c:
                 r = c.get(f"/auth/platform/users/{uuid4()}", headers=_headers())
                 assert r.status_code == 404
         finally:
             app.dependency_overrides.clear()
-            Base.metadata.drop_all(engine)
+            Base.metadata.drop_all(sync_engine)

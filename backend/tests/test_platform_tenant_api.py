@@ -5,9 +5,6 @@ from types import SimpleNamespace
 from uuid import uuid4
 
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
 
 from app.auth_usermanagement.models.audit_event import AuditEvent
 from app.auth_usermanagement.models.membership import Membership
@@ -16,21 +13,15 @@ from app.auth_usermanagement.models.user import User
 from app.auth_usermanagement.security import dependencies as security_dependencies
 from app.database import Base, get_db
 from app.main import app
+from tests.async_test_utils import make_test_db, make_async_app
 
 
 def _make_db():
-    engine = create_engine(
-        "sqlite://",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
-    Base.metadata.create_all(engine)
-    SessionLocal = sessionmaker(bind=engine)
-    return engine, SessionLocal
+    return make_test_db()
 
 
-def _seed_users_and_tenant(SessionLocal):
-    session = SessionLocal()
+def _seed_users_and_tenant(SyncSession):
+    session = SyncSession()
 
     platform_admin = User(
         cognito_sub="platform-admin-sub",
@@ -72,13 +63,10 @@ def _seed_users_and_tenant(SessionLocal):
     return result
 
 
-def _client_with_auth(monkeypatch, SessionLocal, user_sub):
-    def _override_get_db():
-        db = SessionLocal()
-        try:
-            yield db
-        finally:
-            db.close()
+def _client_with_auth(monkeypatch, AsyncSessionLocal, user_sub):
+    async def _override_get_db():
+        async with AsyncSessionLocal() as session:
+            yield session
 
     monkeypatch.setattr(
         security_dependencies,
@@ -95,11 +83,11 @@ def _auth_headers():
 
 
 def test_platform_admin_can_suspend_and_unsuspend_tenant(monkeypatch):
-    engine, SessionLocal = _make_db()
-    ids = _seed_users_and_tenant(SessionLocal)
+    sync_engine, SyncSession, async_engine, AsyncSessionLocal = _make_db()
+    ids = _seed_users_and_tenant(SyncSession)
 
     try:
-        with _client_with_auth(monkeypatch, SessionLocal, ids["platform_sub"]) as client:
+        with _client_with_auth(monkeypatch, AsyncSessionLocal, ids["platform_sub"]) as client:
             suspend_response = client.patch(
                 f"/auth/platform/tenants/{ids['tenant_id']}/suspend",
                 headers=_auth_headers(),
@@ -115,15 +103,15 @@ def test_platform_admin_can_suspend_and_unsuspend_tenant(monkeypatch):
             assert unsuspend_response.json()["status"] == "active"
     finally:
         app.dependency_overrides.clear()
-        Base.metadata.drop_all(engine)
+        Base.metadata.drop_all(sync_engine)
 
 
 def test_platform_admin_can_list_all_tenants(monkeypatch):
-    engine, SessionLocal = _make_db()
-    ids = _seed_users_and_tenant(SessionLocal)
+    sync_engine, SyncSession, async_engine, AsyncSessionLocal = _make_db()
+    ids = _seed_users_and_tenant(SyncSession)
 
     try:
-        with _client_with_auth(monkeypatch, SessionLocal, ids["platform_sub"]) as client:
+        with _client_with_auth(monkeypatch, AsyncSessionLocal, ids["platform_sub"]) as client:
             response = client.get(
                 "/auth/platform/tenants",
                 headers=_auth_headers(),
@@ -142,15 +130,15 @@ def test_platform_admin_can_list_all_tenants(monkeypatch):
             assert beta["member_count"] == 0
     finally:
         app.dependency_overrides.clear()
-        Base.metadata.drop_all(engine)
+        Base.metadata.drop_all(sync_engine)
 
 
 def test_non_platform_admin_cannot_suspend_tenant(monkeypatch):
-    engine, SessionLocal = _make_db()
-    ids = _seed_users_and_tenant(SessionLocal)
+    sync_engine, SyncSession, async_engine, AsyncSessionLocal = _make_db()
+    ids = _seed_users_and_tenant(SyncSession)
 
     try:
-        with _client_with_auth(monkeypatch, SessionLocal, ids["regular_sub"]) as client:
+        with _client_with_auth(monkeypatch, AsyncSessionLocal, ids["regular_sub"]) as client:
             response = client.patch(
                 f"/auth/platform/tenants/{ids['tenant_id']}/suspend",
                 headers=_auth_headers(),
@@ -159,15 +147,15 @@ def test_non_platform_admin_cannot_suspend_tenant(monkeypatch):
             assert response.json()["detail"] == "Only platform administrators can suspend tenant user accounts"
     finally:
         app.dependency_overrides.clear()
-        Base.metadata.drop_all(engine)
+        Base.metadata.drop_all(sync_engine)
 
 
 def test_platform_admin_can_list_failed_invitation_emails(monkeypatch):
-    engine, SessionLocal = _make_db()
-    ids = _seed_users_and_tenant(SessionLocal)
+    sync_engine, SyncSession, async_engine, AsyncSessionLocal = _make_db()
+    ids = _seed_users_and_tenant(SyncSession)
 
     # Seed audit events
-    session = SessionLocal()
+    session = SyncSession()
     from uuid import UUID as _UUID
     session.add(AuditEvent(
         action="email_send_failed",
@@ -184,7 +172,7 @@ def test_platform_admin_can_list_failed_invitation_emails(monkeypatch):
     session.close()
 
     try:
-        with _client_with_auth(monkeypatch, SessionLocal, ids["platform_sub"]) as client:
+        with _client_with_auth(monkeypatch, AsyncSessionLocal, ids["platform_sub"]) as client:
             response = client.get(
                 "/auth/platform/invitations/failed",
                 headers=_auth_headers(),
@@ -197,15 +185,15 @@ def test_platform_admin_can_list_failed_invitation_emails(monkeypatch):
             assert payload[0]["error_detail"] == "SES error: MessageRejected"
     finally:
         app.dependency_overrides.clear()
-        Base.metadata.drop_all(engine)
+        Base.metadata.drop_all(sync_engine)
 
 
 def test_non_admin_cannot_list_failed_invitation_emails(monkeypatch):
-    engine, SessionLocal = _make_db()
-    ids = _seed_users_and_tenant(SessionLocal)
+    sync_engine, SyncSession, async_engine, AsyncSessionLocal = _make_db()
+    ids = _seed_users_and_tenant(SyncSession)
 
     try:
-        with _client_with_auth(monkeypatch, SessionLocal, ids["regular_sub"]) as client:
+        with _client_with_auth(monkeypatch, AsyncSessionLocal, ids["regular_sub"]) as client:
             response = client.get(
                 "/auth/platform/invitations/failed",
                 headers=_auth_headers(),
@@ -213,4 +201,4 @@ def test_non_admin_cannot_list_failed_invitation_emails(monkeypatch):
             assert response.status_code == 403
     finally:
         app.dependency_overrides.clear()
-        Base.metadata.drop_all(engine)
+        Base.metadata.drop_all(sync_engine)

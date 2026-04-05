@@ -1,7 +1,8 @@
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy.orm import Session
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..database import get_db
 
@@ -20,28 +21,28 @@ router = APIRouter()
 @router.get("/platform/tenants", response_model=list[PlatformTenantResponse])
 async def get_platform_tenants(
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
 ):
     """List all tenants across the platform (super admin only)."""
     ensure_platform_admin(current_user, "view tenants")
-    return list_platform_tenants(db)
+    return await list_platform_tenants(db)
 
 
 @router.patch("/platform/tenants/{tenant_id}/suspend", response_model=TenantStatusResponse)
 async def suspend_tenant_account(
     tenant_id: UUID,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
 ):
     """Suspend a tenant (super admin only)."""
     ensure_platform_admin(current_user, "suspend tenant")
 
     try:
-        tenant = suspend_tenant(tenant_id, db)
+        tenant = await suspend_tenant(tenant_id, db)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
-    log_audit_event(
+    await log_audit_event(
         "tenant_suspended",
         actor_user_id=str(current_user.id),
         db=db,
@@ -60,17 +61,17 @@ async def suspend_tenant_account(
 async def unsuspend_tenant_account(
     tenant_id: UUID,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
 ):
     """Unsuspend a tenant (super admin only)."""
     ensure_platform_admin(current_user, "unsuspend tenant")
 
     try:
-        tenant = unsuspend_tenant(tenant_id, db)
+        tenant = await unsuspend_tenant(tenant_id, db)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
-    log_audit_event(
+    await log_audit_event(
         "tenant_unsuspended",
         actor_user_id=str(current_user.id),
         db=db,
@@ -89,7 +90,7 @@ async def unsuspend_tenant_account(
 async def get_failed_invitation_emails(
     limit: int = Query(50, ge=1, le=200),
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
 ):
     """List recent invitation email failures (platform admin only).
 
@@ -98,13 +99,13 @@ async def get_failed_invitation_emails(
     """
     ensure_platform_admin(current_user, "view failed invitation emails")
 
-    events = (
-        db.query(AuditEvent)
-        .filter(AuditEvent.action == "email_send_failed")
+    result = await db.execute(
+        select(AuditEvent)
+        .where(AuditEvent.action == "email_send_failed")
         .order_by(AuditEvent.timestamp.desc())
         .limit(limit)
-        .all()
     )
+    events = result.scalars().all()
 
     return [
         {
@@ -131,11 +132,11 @@ async def query_audit_events(
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
 ):
     """Query audit events with optional filters (platform admin only)."""
     ensure_platform_admin(current_user, "query audit events")
-    return list_audit_events(
+    return await list_audit_events(
         db,
         action=action,
         actor_user_id=actor_user_id,
@@ -151,15 +152,15 @@ async def query_audit_events(
 @router.post("/platform/cleanup")
 async def trigger_cleanup(
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
 ):
     """Trigger cleanup of expired tokens, invitations, and rate-limit hits (platform admin only)."""
     ensure_platform_admin(current_user, "trigger cleanup")
 
-    result = run_cleanup(db)
-    db.commit()
+    result = await run_cleanup(db)
+    await db.commit()
 
-    log_audit_event(
+    await log_audit_event(
         "platform_cleanup_triggered",
         actor_user_id=str(current_user.id),
         db=db,
@@ -187,17 +188,17 @@ async def trigger_cleanup(
 async def delete_tenant_permanently(
     tenant_id: UUID,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
 ):
     """Permanently delete a tenant and all associated data (platform admin only). Irreversible."""
     ensure_platform_admin(current_user, "delete tenant")
 
     try:
-        result = delete_tenant(tenant_id, db)
+        result = await delete_tenant(tenant_id, db)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
-    log_audit_event(
+    await log_audit_event(
         "tenant_permanently_deleted",
         actor_user_id=str(current_user.id),
         db=db,

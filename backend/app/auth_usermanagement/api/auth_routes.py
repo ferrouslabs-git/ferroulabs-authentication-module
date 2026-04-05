@@ -1,7 +1,9 @@
+import os
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException, status
-from sqlalchemy.orm import Session
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..database import get_db
 
@@ -19,15 +21,11 @@ router = APIRouter()
 async def debug_token(authorization: Optional[str] = Header(None)):
     """
     Debug endpoint to test JWT token verification.
-
-    Phase 1 Test Checkpoint:
-    1. Get token from Cognito Hosted UI
-    2. Call: curl -H "Authorization: Bearer <token>" http://localhost:8000/auth/debug-token
-    3. Expected: User claims returned
-
-    Returns:
-        TokenPayload: Decoded and verified JWT claims
+    Only functional when AUTH_DEBUG=1 is set; returns 404 otherwise.
     """
+    if os.getenv("AUTH_DEBUG", "").lower() not in ("1", "true"):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+
     if not authorization:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -69,7 +67,7 @@ async def debug_token(authorization: Optional[str] = Header(None)):
 @router.post("/sync")
 async def sync_user(
     authorization: Optional[str] = Header(None),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
 ):
     """
     Sync Cognito user to database.
@@ -113,7 +111,7 @@ async def sync_user(
         raise exc
 
     try:
-        user = sync_user_from_cognito(token_payload, db)
+        user = await sync_user_from_cognito(token_payload, db)
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -148,19 +146,21 @@ async def get_current_user_profile(current_user: User = Depends(get_current_user
 @router.get("/me/memberships", response_model=list[MembershipListResponse])
 async def get_my_memberships(
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
 ):
     """List all memberships for the authenticated user."""
-    memberships = (
-        db.query(Membership)
-        .filter(Membership.user_id == current_user.id, Membership.status == "active")
-        .all()
+    result = await db.execute(
+        select(Membership).where(
+            Membership.user_id == current_user.id, Membership.status == "active"
+        )
     )
+    memberships = result.scalars().all()
     results = []
     for m in memberships:
         tenant_name = None
         if m.scope_type == "account":
-            tenant = db.query(Tenant).filter(Tenant.id == m.scope_id).first()
+            t_result = await db.execute(select(Tenant).where(Tenant.id == m.scope_id))
+            tenant = t_result.scalar_one_or_none()
             if tenant:
                 tenant_name = tenant.name
         results.append(

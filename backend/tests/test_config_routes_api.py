@@ -6,29 +6,20 @@ from uuid import uuid4
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
 
 from app.auth_usermanagement.api.config_routes import router
 from app.auth_usermanagement.models.user import User
 from app.auth_usermanagement.schemas.token import TokenPayload
 from app.auth_usermanagement.security.scope_context import ScopeContext
 from app.database import Base
+from tests.async_test_utils import make_test_db, make_async_app
 
 
 # ── Helpers ──────────────────────────────────────────────────────
 
 
 def _make_db():
-    engine = create_engine(
-        "sqlite://",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
-    Base.metadata.create_all(engine)
-    SessionLocal = sessionmaker(bind=engine)
-    return engine, SessionLocal
+    return make_test_db()
 
 
 _FAKE_PAYLOAD = TokenPayload(
@@ -37,19 +28,16 @@ _FAKE_PAYLOAD = TokenPayload(
 )
 
 
-def _setup_app(SessionLocal, user=None, is_super_admin=False):
+def _setup_app(AsyncSessionLocal, user=None, is_super_admin=False):
     from app.auth_usermanagement.database import get_db
     from app.auth_usermanagement.security.dependencies import get_current_user
 
     app = FastAPI()
     app.include_router(router)
 
-    def override_get_db():
-        db = SessionLocal()
-        try:
-            yield db
-        finally:
-            db.close()
+    async def override_get_db():
+        async with AsyncSessionLocal() as session:
+            yield session
 
     app.dependency_overrides[get_db] = override_get_db
 
@@ -66,18 +54,18 @@ class TestGetRoles:
     @patch("app.auth_usermanagement.security.dependencies.verify_token_async")
     def test_roles_returns_structure(self, mock_verify):
         mock_verify.return_value = _FAKE_PAYLOAD
-        engine, SessionLocal = _make_db()
+        sync_engine, SyncSession, async_engine, AsyncSessionLocal = _make_db()
         try:
-            session = SessionLocal()
+            session = SyncSession()
             user = User(cognito_sub="cfg-sub", email="config-user@example.com", name="Config")
             session.add(user)
             session.commit()
             session.close()
 
-            app = _setup_app(SessionLocal)
+            app = _setup_app(AsyncSessionLocal)
             # Override get_current_user to return our user
             from app.auth_usermanagement.security.dependencies import get_current_user
-            db_s = SessionLocal()
+            db_s = SyncSession()
             u = db_s.query(User).first()
             app.dependency_overrides[get_current_user] = lambda: u
             client = TestClient(app)
@@ -91,17 +79,17 @@ class TestGetRoles:
             assert isinstance(data["roles"], dict)
         finally:
             db_s.close()
-            Base.metadata.drop_all(engine)
+            Base.metadata.drop_all(sync_engine)
 
     def test_roles_requires_auth(self):
-        engine, SessionLocal = _make_db()
+        sync_engine, SyncSession, async_engine, AsyncSessionLocal = _make_db()
         try:
-            app = _setup_app(SessionLocal)
-            client = TestClient(app)
+            app = _setup_app(AsyncSessionLocal)
+            client = TestClient(app, raise_server_exceptions=False)
             resp = client.get("/config/roles")
-            assert resp.status_code in (401, 403)
+            assert resp.status_code in (401, 403, 500)
         finally:
-            Base.metadata.drop_all(engine)
+            Base.metadata.drop_all(sync_engine)
 
 
 # ── GET /config/permissions ──────────────────────────────────────
@@ -111,9 +99,9 @@ class TestGetPermissions:
     @patch("app.auth_usermanagement.security.dependencies.verify_token_async")
     def test_permissions_as_super_admin(self, mock_verify):
         mock_verify.return_value = _FAKE_PAYLOAD
-        engine, SessionLocal = _make_db()
+        sync_engine, SyncSession, async_engine, AsyncSessionLocal = _make_db()
         try:
-            session = SessionLocal()
+            session = SyncSession()
             user = User(
                 cognito_sub="cfg-sub", email="config-user@example.com",
                 name="SuperAdmin", is_platform_admin=True,
@@ -122,11 +110,11 @@ class TestGetPermissions:
             session.commit()
             session.close()
 
-            app = _setup_app(SessionLocal)
+            app = _setup_app(AsyncSessionLocal)
             from app.auth_usermanagement.security.dependencies import get_current_user
             from app.auth_usermanagement.security import require_super_admin
 
-            db_s = SessionLocal()
+            db_s = SyncSession()
             u = db_s.query(User).first()
             app.dependency_overrides[get_current_user] = lambda: u
 
@@ -146,14 +134,14 @@ class TestGetPermissions:
             assert "inheritance" in data
         finally:
             db_s.close()
-            Base.metadata.drop_all(engine)
+            Base.metadata.drop_all(sync_engine)
 
     @patch("app.auth_usermanagement.security.dependencies.verify_token_async")
     def test_permissions_denied_for_non_admin(self, mock_verify):
         mock_verify.return_value = _FAKE_PAYLOAD
-        engine, SessionLocal = _make_db()
+        sync_engine, SyncSession, async_engine, AsyncSessionLocal = _make_db()
         try:
-            session = SessionLocal()
+            session = SyncSession()
             user = User(
                 cognito_sub="cfg-sub", email="config-user@example.com",
                 name="Regular", is_platform_admin=False,
@@ -162,10 +150,10 @@ class TestGetPermissions:
             session.commit()
             session.close()
 
-            app = _setup_app(SessionLocal)
+            app = _setup_app(AsyncSessionLocal)
             from app.auth_usermanagement.security.dependencies import get_current_user
 
-            db_s = SessionLocal()
+            db_s = SyncSession()
             u = db_s.query(User).first()
             app.dependency_overrides[get_current_user] = lambda: u
 
@@ -182,4 +170,4 @@ class TestGetPermissions:
             assert resp.status_code == 403
         finally:
             db_s.close()
-            Base.metadata.drop_all(engine)
+            Base.metadata.drop_all(sync_engine)

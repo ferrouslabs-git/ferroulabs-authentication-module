@@ -1,7 +1,9 @@
 """
 Tenant service - handles tenant creation and management
 """
-from sqlalchemy.orm import Session, selectinload
+from sqlalchemy import select, delete as sa_delete, func
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 from typing import List, Optional
 from uuid import UUID
 
@@ -10,34 +12,21 @@ from ..models.membership import Membership
 from ..models.user import User
 
 
-def create_tenant(
+async def create_tenant(
     name: str,
     user: User,
-    db: Session,
+    db: AsyncSession,
     plan: str = "free"
 ) -> Tenant:
-    """
-    Create a new tenant and assign creator as owner.
-    
-    Args:
-        name: Tenant organization name
-        user: Current user (will be made owner)
-        db: Database session
-        plan: Pricing plan (default: free)
-    
-    Returns:
-        Tenant: Created tenant object
-    """
-    # Create tenant
+    """Create a new tenant and assign creator as owner."""
     tenant = Tenant(
         name=name,
         plan=plan,
         status="active"
     )
     db.add(tenant)
-    db.flush()  # Get the tenant ID without committing
+    await db.flush()
     
-    # Create owner membership for the creator
     membership = Membership(
         user_id=user.id,
         scope_type="account",
@@ -46,44 +35,36 @@ def create_tenant(
         status="active"
     )
     db.add(membership)
-    db.commit()
-    db.refresh(tenant)
+    await db.commit()
+    await db.refresh(tenant)
     
     return tenant
 
 
-def get_tenant_by_id(tenant_id: UUID, db: Session) -> Optional[Tenant]:
-    """
-    Get tenant by ID.
-    
-    Args:
-        tenant_id: Tenant UUID
-        db: Database session
-    
-    Returns:
-        Tenant if found, None otherwise
-    """
-    return db.query(Tenant).filter(Tenant.id == tenant_id).first()
+async def get_tenant_by_id(tenant_id: UUID, db: AsyncSession) -> Optional[Tenant]:
+    """Get tenant by ID."""
+    result = await db.execute(
+        select(Tenant)
+        .options(selectinload(Tenant.memberships))
+        .where(Tenant.id == tenant_id)
+    )
+    return result.scalar_one_or_none()
 
 
-def get_user_tenants(user_id: UUID, db: Session) -> List[dict]:
-    """
-    Get all tenants that a user belongs to with their role.
+async def get_user_tenants(user_id: UUID, db: AsyncSession) -> List[dict]:
+    """Get all tenants that a user belongs to with their role."""
+    result = await db.execute(
+        select(Membership)
+        .options(selectinload(Membership.tenant))
+        .where(
+            Membership.user_id == user_id,
+            Membership.scope_type == "account",
+            Membership.status == "active",
+        )
+    )
+    memberships = result.scalars().all()
     
-    Args:
-        user_id: User UUID
-        db: Database session
-    
-    Returns:
-        List of tenant dict with user's role
-    """
-    memberships = db.query(Membership).filter(
-        Membership.user_id == user_id,
-        Membership.scope_type == "account",
-        Membership.status == "active"
-    ).all()
-    
-    result = []
+    results = []
     for membership in memberships:
         tenant_data = {
             "id": membership.tenant.id if membership.tenant else membership.scope_id,
@@ -93,39 +74,36 @@ def get_user_tenants(user_id: UUID, db: Session) -> List[dict]:
             "role": membership.role_name,
             "created_at": membership.tenant.created_at if membership.tenant else None
         }
-        result.append(tenant_data)
+        results.append(tenant_data)
     
-    return result
+    return results
 
 
-def get_user_tenant_role(
+async def get_user_tenant_role(
     user_id: UUID,
     tenant_id: UUID,
-    db: Session
+    db: AsyncSession
 ) -> Optional[str]:
-    """
-    Get user's role in a specific tenant.
-    
-    Args:
-        user_id: User UUID
-        tenant_id: Tenant UUID
-        db: Database session
-    
-    Returns:
-        Role string (owner, admin, member, viewer) or None if not a member
-    """
-    membership = db.query(Membership).filter(
-        Membership.user_id == user_id,
-        Membership.scope_type == "account",
-        Membership.scope_id == tenant_id,
-        Membership.status == "active"
-    ).first()
-    
+    """Get user's role in a specific tenant."""
+    result = await db.execute(
+        select(Membership).where(
+            Membership.user_id == user_id,
+            Membership.scope_type == "account",
+            Membership.scope_id == tenant_id,
+            Membership.status == "active",
+        )
+    )
+    membership = result.scalar_one_or_none()
     return membership.role_name if membership else None
 
 
-def list_platform_tenants(db: Session) -> List[dict]:
-    tenants = db.query(Tenant).options(selectinload(Tenant.memberships)).order_by(Tenant.name.asc()).all()
+async def list_platform_tenants(db: AsyncSession) -> List[dict]:
+    result = await db.execute(
+        select(Tenant)
+        .options(selectinload(Tenant.memberships))
+        .order_by(Tenant.name.asc())
+    )
+    tenants = result.scalars().all()
 
     return [
         {
@@ -145,59 +123,51 @@ def list_platform_tenants(db: Session) -> List[dict]:
     ]
 
 
-def verify_user_tenant_access(
+async def verify_user_tenant_access(
     user_id: UUID,
     tenant_id: UUID,
-    db: Session
+    db: AsyncSession
 ) -> bool:
-    """
-    Verify if user has access to a tenant.
-    
-    Args:
-        user_id: User UUID
-        tenant_id: Tenant UUID
-        db: Database session
-    
-    Returns:
-        True if user has active membership, False otherwise
-    """
-    membership = db.query(Membership).filter(
-        Membership.user_id == user_id,
-        Membership.scope_type == "account",
-        Membership.scope_id == tenant_id,
-        Membership.status == "active"
-    ).first()
-    
+    """Verify if user has access to a tenant."""
+    result = await db.execute(
+        select(Membership).where(
+            Membership.user_id == user_id,
+            Membership.scope_type == "account",
+            Membership.scope_id == tenant_id,
+            Membership.status == "active",
+        )
+    )
+    membership = result.scalar_one_or_none()
     return membership is not None
 
 
-def suspend_tenant(tenant_id: UUID, db: Session) -> Tenant:
+async def suspend_tenant(tenant_id: UUID, db: AsyncSession) -> Tenant:
     """Suspend a tenant to block organization-level operations."""
-    tenant = get_tenant_by_id(tenant_id, db)
+    tenant = await get_tenant_by_id(tenant_id, db)
     if not tenant:
         raise ValueError(f"Tenant not found: {tenant_id}")
 
     tenant.status = "suspended"
-    db.commit()
-    db.refresh(tenant)
+    await db.commit()
+    await db.refresh(tenant)
     return tenant
 
 
-def unsuspend_tenant(tenant_id: UUID, db: Session) -> Tenant:
+async def unsuspend_tenant(tenant_id: UUID, db: AsyncSession) -> Tenant:
     """Restore a suspended tenant back to active status."""
-    tenant = get_tenant_by_id(tenant_id, db)
+    tenant = await get_tenant_by_id(tenant_id, db)
     if not tenant:
         raise ValueError(f"Tenant not found: {tenant_id}")
 
     tenant.status = "active"
-    db.commit()
-    db.refresh(tenant)
+    await db.commit()
+    await db.refresh(tenant)
     return tenant
 
 
-def update_tenant(tenant_id: UUID, db: Session, *, name: str | None = None, plan: str | None = None) -> Tenant:
+async def update_tenant(tenant_id: UUID, db: AsyncSession, *, name: str | None = None, plan: str | None = None) -> Tenant:
     """Update mutable tenant fields (name, plan)."""
-    tenant = get_tenant_by_id(tenant_id, db)
+    tenant = await get_tenant_by_id(tenant_id, db)
     if not tenant:
         raise ValueError(f"Tenant not found: {tenant_id}")
 
@@ -206,45 +176,46 @@ def update_tenant(tenant_id: UUID, db: Session, *, name: str | None = None, plan
     if plan is not None:
         tenant.plan = plan
 
-    db.commit()
-    db.refresh(tenant)
+    await db.commit()
+    await db.refresh(tenant, attribute_names=["memberships"])
     return tenant
 
 
-def delete_tenant(tenant_id: UUID, db: Session) -> dict:
-    """Permanently delete a tenant and all associated data.
-
-    Cascades: invitations (via FK CASCADE), memberships removed manually,
-    spaces deleted manually. Irreversible.
-    """
+async def delete_tenant(tenant_id: UUID, db: AsyncSession) -> dict:
+    """Permanently delete a tenant and all associated data."""
     from ..models.invitation import Invitation
     from ..models.space import Space
 
-    tenant = get_tenant_by_id(tenant_id, db)
+    tenant = await get_tenant_by_id(tenant_id, db)
     if not tenant:
         raise ValueError(f"Tenant not found: {tenant_id}")
 
     name = tenant.name
 
     # Delete account-scoped memberships
-    db.query(Membership).filter(
-        Membership.scope_type == "account",
-        Membership.scope_id == tenant_id,
-    ).delete(synchronize_session=False)
+    await db.execute(
+        sa_delete(Membership).where(
+            Membership.scope_type == "account",
+            Membership.scope_id == tenant_id,
+        )
+    )
 
     # Delete spaces belonging to this tenant and their space-scoped memberships
-    space_ids = [s.id for s in db.query(Space).filter(Space.account_id == tenant_id).all()]
+    space_result = await db.execute(select(Space).where(Space.account_id == tenant_id))
+    space_ids = [s.id for s in space_result.scalars().all()]
     if space_ids:
-        db.query(Membership).filter(
-            Membership.scope_type == "space",
-            Membership.scope_id.in_(space_ids),
-        ).delete(synchronize_session=False)
-        db.query(Space).filter(Space.account_id == tenant_id).delete(synchronize_session=False)
+        await db.execute(
+            sa_delete(Membership).where(
+                Membership.scope_type == "space",
+                Membership.scope_id.in_(space_ids),
+            )
+        )
+        await db.execute(sa_delete(Space).where(Space.account_id == tenant_id))
 
     # Invitations cascade via FK, but be explicit
-    db.query(Invitation).filter(Invitation.tenant_id == tenant_id).delete(synchronize_session=False)
+    await db.execute(sa_delete(Invitation).where(Invitation.tenant_id == tenant_id))
 
-    db.delete(tenant)
-    db.commit()
+    await db.delete(tenant)
+    await db.commit()
 
     return {"tenant_id": str(tenant_id), "name": name}

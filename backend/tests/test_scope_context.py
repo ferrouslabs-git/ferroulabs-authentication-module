@@ -3,12 +3,8 @@ from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
 from starlette.requests import Request
 
-from app.database import Base
 from app.auth_usermanagement.models.membership import Membership
 from app.auth_usermanagement.models.space import Space
 from app.auth_usermanagement.models.tenant import Tenant
@@ -33,21 +29,6 @@ def _make_request(headers: dict[str, str]) -> Request:
         "query_string": b"",
     }
     return Request(scope)
-
-
-@pytest.fixture
-def test_db():
-    engine = create_engine(
-        "sqlite://",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
-    Base.metadata.create_all(engine)
-    Session = sessionmaker(bind=engine)
-    session = Session()
-    yield session
-    session.close()
-    Base.metadata.drop_all(engine)
 
 
 @pytest.fixture(autouse=True)
@@ -86,24 +67,26 @@ def _make_space(db, account_id, name="Test Space"):
 # ── Account scope tests ─────────────────────────────────────────
 
 
-def test_account_scope_with_new_headers(test_db):
+@pytest.mark.asyncio
+async def test_account_scope_with_new_headers(dual_session):
     """X-Scope-Type: account + X-Scope-ID resolves correct permissions."""
-    user = _make_user(test_db)
-    account = _make_account(test_db)
-    test_db.add(Membership(
+    sync_db, async_db = dual_session
+    user = _make_user(sync_db)
+    account = _make_account(sync_db)
+    sync_db.add(Membership(
         user_id=user.id,
         scope_type="account",
         scope_id=account.id,
         role_name="account_owner",
         status="active",
     ))
-    test_db.commit()
+    sync_db.commit()
 
     request = _make_request({
         "X-Scope-Type": "account",
         "X-Scope-ID": str(account.id),
     })
-    ctx = get_scope_context(request, user, test_db)
+    ctx = await get_scope_context(request, user, async_db)
 
     assert ctx.scope_type == "account"
     assert ctx.scope_id == account.id
@@ -113,21 +96,23 @@ def test_account_scope_with_new_headers(test_db):
     assert not ctx.is_super_admin
 
 
-def test_tenant_id_header_resolves_account_scope(test_db):
+@pytest.mark.asyncio
+async def test_tenant_id_header_resolves_account_scope(dual_session):
     """X-Tenant-ID header resolves as scope_type=account."""
-    user = _make_user(test_db)
-    account = _make_account(test_db)
-    test_db.add(Membership(
+    sync_db, async_db = dual_session
+    user = _make_user(sync_db)
+    account = _make_account(sync_db)
+    sync_db.add(Membership(
         user_id=user.id,
         scope_type="account",
         scope_id=account.id,
         role_name="account_owner",
         status="active",
     ))
-    test_db.commit()
+    sync_db.commit()
 
     request = _make_request({"X-Tenant-ID": str(account.id)})
-    ctx = get_scope_context(request, user, test_db)
+    ctx = await get_scope_context(request, user, async_db)
 
     assert ctx.scope_type == "account"
     assert ctx.scope_id == account.id
@@ -138,25 +123,27 @@ def test_tenant_id_header_resolves_account_scope(test_db):
 # ── Space scope tests ───────────────────────────────────────────
 
 
-def test_space_scope_direct_membership(test_db):
+@pytest.mark.asyncio
+async def test_space_scope_direct_membership(dual_session):
     """Space-scope request resolves permissions from space memberships."""
-    user = _make_user(test_db)
-    account = _make_account(test_db)
-    space = _make_space(test_db, account.id)
-    test_db.add(Membership(
+    sync_db, async_db = dual_session
+    user = _make_user(sync_db)
+    account = _make_account(sync_db)
+    space = _make_space(sync_db, account.id)
+    sync_db.add(Membership(
         user_id=user.id,
         scope_type="space",
         scope_id=space.id,
         role_name="space_member",
         status="active",
     ))
-    test_db.commit()
+    sync_db.commit()
 
     request = _make_request({
         "X-Scope-Type": "space",
         "X-Scope-ID": str(space.id),
     })
-    ctx = get_scope_context(request, user, test_db)
+    ctx = await get_scope_context(request, user, async_db)
 
     assert ctx.scope_type == "space"
     assert ctx.scope_id == space.id
@@ -169,26 +156,28 @@ def test_space_scope_direct_membership(test_db):
 # ── Inheritance tests ────────────────────────────────────────────
 
 
-def test_inheritance_account_owner_gets_space_admin(test_db):
+@pytest.mark.asyncio
+async def test_inheritance_account_owner_gets_space_admin(dual_session):
     """account_owner inherits space_admin permissions when requesting space scope."""
-    user = _make_user(test_db)
-    account = _make_account(test_db)
-    space = _make_space(test_db, account.id)
+    sync_db, async_db = dual_session
+    user = _make_user(sync_db)
+    account = _make_account(sync_db)
+    space = _make_space(sync_db, account.id)
     # Only account-level membership, no space membership
-    test_db.add(Membership(
+    sync_db.add(Membership(
         user_id=user.id,
         scope_type="account",
         scope_id=account.id,
         role_name="account_owner",
         status="active",
     ))
-    test_db.commit()
+    sync_db.commit()
 
     request = _make_request({
         "X-Scope-Type": "space",
         "X-Scope-ID": str(space.id),
     })
-    ctx = get_scope_context(request, user, test_db)
+    ctx = await get_scope_context(request, user, async_db)
 
     assert "space_admin" in ctx.active_roles
     assert ctx.has_permission("space:delete")
@@ -197,25 +186,27 @@ def test_inheritance_account_owner_gets_space_admin(test_db):
     assert ctx.has_permission("members:manage")
 
 
-def test_inheritance_account_admin_gets_space_member(test_db):
+@pytest.mark.asyncio
+async def test_inheritance_account_admin_gets_space_member(dual_session):
     """account_admin inherits space_member permissions."""
-    user = _make_user(test_db)
-    account = _make_account(test_db)
-    space = _make_space(test_db, account.id)
-    test_db.add(Membership(
+    sync_db, async_db = dual_session
+    user = _make_user(sync_db)
+    account = _make_account(sync_db)
+    space = _make_space(sync_db, account.id)
+    sync_db.add(Membership(
         user_id=user.id,
         scope_type="account",
         scope_id=account.id,
         role_name="account_admin",
         status="active",
     ))
-    test_db.commit()
+    sync_db.commit()
 
     request = _make_request({
         "X-Scope-Type": "space",
         "X-Scope-ID": str(space.id),
     })
-    ctx = get_scope_context(request, user, test_db)
+    ctx = await get_scope_context(request, user, async_db)
 
     assert "space_member" in ctx.active_roles
     assert ctx.has_permission("data:read")
@@ -223,19 +214,21 @@ def test_inheritance_account_admin_gets_space_member(test_db):
     assert not ctx.has_permission("space:delete")
 
 
-def test_inheritance_account_member_gets_nothing_by_default(test_db):
+@pytest.mark.asyncio
+async def test_inheritance_account_member_gets_nothing_by_default(dual_session):
     """account_member gets nothing by default (config: none)."""
-    user = _make_user(test_db)
-    account = _make_account(test_db)
-    space = _make_space(test_db, account.id)
-    test_db.add(Membership(
+    sync_db, async_db = dual_session
+    user = _make_user(sync_db)
+    account = _make_account(sync_db)
+    space = _make_space(sync_db, account.id)
+    sync_db.add(Membership(
         user_id=user.id,
         scope_type="account",
         scope_id=account.id,
         role_name="account_member",
         status="active",
     ))
-    test_db.commit()
+    sync_db.commit()
 
     request = _make_request({
         "X-Scope-Type": "space",
@@ -244,41 +237,45 @@ def test_inheritance_account_member_gets_nothing_by_default(test_db):
 
     from fastapi import HTTPException
     with pytest.raises(HTTPException) as exc_info:
-        get_scope_context(request, user, test_db)
+        await get_scope_context(request, user, async_db)
     assert exc_info.value.status_code == 403
 
 
 # ── Super admin tests ────────────────────────────────────────────
 
 
-def test_super_admin_bypasses_membership_check(test_db):
+@pytest.mark.asyncio
+async def test_super_admin_bypasses_membership_check(dual_session):
     """super_admin can access any scope without membership."""
-    admin = _make_user(test_db, platform_admin=True, email_prefix="admin")
-    account = _make_account(test_db)
+    sync_db, async_db = dual_session
+    admin = _make_user(sync_db, platform_admin=True, email_prefix="admin")
+    account = _make_account(sync_db)
     # No membership created
 
     request = _make_request({
         "X-Scope-Type": "account",
         "X-Scope-ID": str(account.id),
     })
-    ctx = get_scope_context(request, admin, test_db)
+    ctx = await get_scope_context(request, admin, async_db)
 
     assert ctx.is_super_admin is True
     assert ctx.scope_id == account.id
     assert ctx.has_permission("anything:at_all")  # super_admin bypasses
 
 
-def test_platform_admin_space_access_without_membership(test_db):
+@pytest.mark.asyncio
+async def test_platform_admin_space_access_without_membership(dual_session):
     """Platform admin can access space scope without any membership."""
-    admin = _make_user(test_db, platform_admin=True, email_prefix="padmin")
-    account = _make_account(test_db)
-    space = _make_space(test_db, account.id)
+    sync_db, async_db = dual_session
+    admin = _make_user(sync_db, platform_admin=True, email_prefix="padmin")
+    account = _make_account(sync_db)
+    space = _make_space(sync_db, account.id)
 
     request = _make_request({
         "X-Scope-Type": "space",
         "X-Scope-ID": str(space.id),
     })
-    ctx = get_scope_context(request, admin, test_db)
+    ctx = await get_scope_context(request, admin, async_db)
 
     assert ctx.is_super_admin is True
     assert ctx.scope_type == "space"
@@ -287,24 +284,28 @@ def test_platform_admin_space_access_without_membership(test_db):
 # ── Error cases ──────────────────────────────────────────────────
 
 
-def test_missing_scope_headers_returns_400(test_db):
+@pytest.mark.asyncio
+async def test_missing_scope_headers_returns_400(dual_session):
     """Missing scope headers → 400."""
-    user = _make_user(test_db)
-    test_db.commit()
+    sync_db, async_db = dual_session
+    user = _make_user(sync_db)
+    sync_db.commit()
 
     request = _make_request({})
 
     from fastapi import HTTPException
     with pytest.raises(HTTPException) as exc_info:
-        get_scope_context(request, user, test_db)
+        await get_scope_context(request, user, async_db)
     assert exc_info.value.status_code == 400
     assert "Scope headers required" in exc_info.value.detail
 
 
-def test_invalid_scope_type_returns_400(test_db):
+@pytest.mark.asyncio
+async def test_invalid_scope_type_returns_400(dual_session):
     """Invalid X-Scope-Type → 400."""
-    user = _make_user(test_db)
-    test_db.commit()
+    sync_db, async_db = dual_session
+    user = _make_user(sync_db)
+    sync_db.commit()
 
     request = _make_request({
         "X-Scope-Type": "galaxy",
@@ -313,15 +314,17 @@ def test_invalid_scope_type_returns_400(test_db):
 
     from fastapi import HTTPException
     with pytest.raises(HTTPException) as exc_info:
-        get_scope_context(request, user, test_db)
+        await get_scope_context(request, user, async_db)
     assert exc_info.value.status_code == 400
     assert "Invalid X-Scope-Type" in exc_info.value.detail
 
 
-def test_invalid_scope_id_format_returns_400(test_db):
+@pytest.mark.asyncio
+async def test_invalid_scope_id_format_returns_400(dual_session):
     """Invalid UUID in scope ID → 400."""
-    user = _make_user(test_db)
-    test_db.commit()
+    sync_db, async_db = dual_session
+    user = _make_user(sync_db)
+    sync_db.commit()
 
     request = _make_request({
         "X-Scope-Type": "account",
@@ -330,16 +333,18 @@ def test_invalid_scope_id_format_returns_400(test_db):
 
     from fastapi import HTTPException
     with pytest.raises(HTTPException) as exc_info:
-        get_scope_context(request, user, test_db)
+        await get_scope_context(request, user, async_db)
     assert exc_info.value.status_code == 400
     assert "Invalid scope ID" in exc_info.value.detail
 
 
-def test_no_membership_returns_403(test_db):
+@pytest.mark.asyncio
+async def test_no_membership_returns_403(dual_session):
     """No membership in scope → 403 for non-admin."""
-    user = _make_user(test_db)
-    account = _make_account(test_db)
-    test_db.commit()
+    sync_db, async_db = dual_session
+    user = _make_user(sync_db)
+    account = _make_account(sync_db)
+    sync_db.commit()
     # No membership
 
     request = _make_request({
@@ -349,7 +354,7 @@ def test_no_membership_returns_403(test_db):
 
     from fastapi import HTTPException
     with pytest.raises(HTTPException) as exc_info:
-        get_scope_context(request, user, test_db)
+        await get_scope_context(request, user, async_db)
     assert exc_info.value.status_code == 403
     assert "Access denied" in exc_info.value.detail
 
@@ -357,25 +362,27 @@ def test_no_membership_returns_403(test_db):
 # ── Caching test ─────────────────────────────────────────────────
 
 
-def test_scope_context_cached_on_request_state(test_db):
+@pytest.mark.asyncio
+async def test_scope_context_cached_on_request_state(dual_session):
     """Second call returns cached ScopeContext from request.state."""
-    user = _make_user(test_db)
-    account = _make_account(test_db)
-    test_db.add(Membership(
+    sync_db, async_db = dual_session
+    user = _make_user(sync_db)
+    account = _make_account(sync_db)
+    sync_db.add(Membership(
         user_id=user.id,
         scope_type="account",
         scope_id=account.id,
         role_name="account_admin",
         status="active",
     ))
-    test_db.commit()
+    sync_db.commit()
 
     request = _make_request({
         "X-Scope-Type": "account",
         "X-Scope-ID": str(account.id),
     })
-    ctx1 = get_scope_context(request, user, test_db)
-    ctx2 = get_scope_context(request, user, test_db)
+    ctx1 = await get_scope_context(request, user, async_db)
+    ctx2 = await get_scope_context(request, user, async_db)
 
     assert ctx1 is ctx2
 
@@ -383,21 +390,23 @@ def test_scope_context_cached_on_request_state(test_db):
 # ── Deprecated get_tenant_context wrapper ────────────────────────
 
 
-def test_deprecated_tenant_context_wraps_scope_context(test_db):
+@pytest.mark.asyncio
+async def test_deprecated_tenant_context_wraps_scope_context(dual_session):
     """get_tenant_context returns TenantContext via get_scope_context."""
-    user = _make_user(test_db)
-    account = _make_account(test_db)
-    test_db.add(Membership(
+    sync_db, async_db = dual_session
+    user = _make_user(sync_db)
+    account = _make_account(sync_db)
+    sync_db.add(Membership(
         user_id=user.id,
         scope_type="account",
         scope_id=account.id,
         role_name="account_owner",
         status="active",
     ))
-    test_db.commit()
+    sync_db.commit()
 
     request = _make_request({"X-Tenant-ID": str(account.id)})
-    ctx = get_tenant_context(request, user, test_db)
+    ctx = await get_tenant_context(request, user, async_db)
 
     assert ctx.tenant_id == account.id
     assert ctx.role == "owner"
@@ -405,14 +414,16 @@ def test_deprecated_tenant_context_wraps_scope_context(test_db):
     assert not ctx.is_platform_admin
 
 
-def test_deprecated_tenant_context_platform_admin(test_db):
+@pytest.mark.asyncio
+async def test_deprecated_tenant_context_platform_admin(dual_session):
     """Platform admin via deprecated wrapper gets is_platform_admin=True."""
-    admin = _make_user(test_db, platform_admin=True, email_prefix="dep-admin")
-    account = _make_account(test_db)
-    test_db.commit()
+    sync_db, async_db = dual_session
+    admin = _make_user(sync_db, platform_admin=True, email_prefix="dep-admin")
+    account = _make_account(sync_db)
+    sync_db.commit()
 
     request = _make_request({"X-Tenant-ID": str(account.id)})
-    ctx = get_tenant_context(request, admin, test_db)
+    ctx = await get_tenant_context(request, admin, async_db)
 
     assert ctx.is_platform_admin is True
     assert ctx.role is None  # no membership

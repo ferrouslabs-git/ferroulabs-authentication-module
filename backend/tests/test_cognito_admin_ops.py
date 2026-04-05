@@ -4,9 +4,6 @@ from unittest.mock import MagicMock, patch
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
 
 from app.auth_usermanagement.models.membership import Membership
 from app.auth_usermanagement.models.session import Session as AuthSession
@@ -23,17 +20,11 @@ from app.auth_usermanagement.services.cognito_admin_service import (
 )
 from app.auth_usermanagement.services.user_service import delete_user
 from app.database import Base
+from tests.async_test_utils import make_test_db, make_async_app
 
 
 def _make_db():
-    engine = create_engine(
-        "sqlite://",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
-    Base.metadata.create_all(engine)
-    SessionLocal = sessionmaker(bind=engine)
-    return engine, SessionLocal
+    return make_test_db()
 
 
 # ── cognito_admin_service unit tests ─────────────────────────────
@@ -143,11 +134,12 @@ def test_admin_reset_user_password_success(mock_client_factory):
 
 
 @patch("app.auth_usermanagement.services.cognito_admin_service.admin_delete_user")
-def test_delete_user_removes_all_related_records(mock_cognito_delete):
-    engine, SessionLocal = _make_db()
+@pytest.mark.asyncio
+async def test_delete_user_removes_all_related_records(mock_cognito_delete):
+    sync_engine, SyncSession, async_engine, AsyncSessionLocal = _make_db()
     mock_cognito_delete.return_value = {"deleted": True}
 
-    session = SessionLocal()
+    session = SyncSession()
     tenant = Tenant(name="Test Tenant")
     user = User(cognito_sub="del-sub-1", email="del@example.com", name="Del User")
     session.add_all([tenant, user])
@@ -159,48 +151,50 @@ def test_delete_user_removes_all_related_records(mock_cognito_delete):
     user_id = user.id
     session.close()
 
-    session = SessionLocal()
     try:
-        result = delete_user(user_id, session)
+        async with AsyncSessionLocal() as adb:
+            result = await delete_user(user_id, adb)
 
-        assert result["deleted"] is True
-        assert result["email"] == "del@example.com"
+            assert result["deleted"] is True
+            assert result["email"] == "del@example.com"
 
-        # Verify cleanup
+        # Verify cleanup with sync session
+        session = SyncSession()
         assert session.query(User).filter(User.id == user_id).first() is None
         assert session.query(Membership).filter(Membership.user_id == user_id).count() == 0
         assert session.query(AuthSession).filter(AuthSession.user_id == user_id).count() == 0
-    finally:
         session.close()
-        Base.metadata.drop_all(engine)
+    finally:
+        Base.metadata.drop_all(sync_engine)
 
 
 @patch("app.auth_usermanagement.services.cognito_admin_service.admin_delete_user")
-def test_delete_user_rejects_platform_admin(mock_cognito_delete):
-    engine, SessionLocal = _make_db()
+@pytest.mark.asyncio
+async def test_delete_user_rejects_platform_admin(mock_cognito_delete):
+    sync_engine, SyncSession, async_engine, AsyncSessionLocal = _make_db()
 
-    session = SessionLocal()
+    session = SyncSession()
     user = User(cognito_sub="admin-del", email="admin-del@example.com", name="PA", is_platform_admin=True)
     session.add(user)
     session.commit()
     user_id = user.id
     session.close()
 
-    session = SessionLocal()
     try:
-        with pytest.raises(ValueError, match="platform admin"):
-            delete_user(user_id, session)
+        async with AsyncSessionLocal() as adb:
+            with pytest.raises(ValueError, match="platform admin"):
+                await delete_user(user_id, adb)
         mock_cognito_delete.assert_not_called()
     finally:
-        session.close()
-        Base.metadata.drop_all(engine)
+        Base.metadata.drop_all(sync_engine)
 
 
 @patch("app.auth_usermanagement.services.cognito_admin_service.admin_delete_user")
-def test_delete_user_rejects_last_owner(mock_cognito_delete):
-    engine, SessionLocal = _make_db()
+@pytest.mark.asyncio
+async def test_delete_user_rejects_last_owner(mock_cognito_delete):
+    sync_engine, SyncSession, async_engine, AsyncSessionLocal = _make_db()
 
-    session = SessionLocal()
+    session = SyncSession()
     tenant = Tenant(name="Sole Owner Corp")
     user = User(cognito_sub="sole-owner", email="sole@example.com", name="Sole")
     session.add_all([tenant, user])
@@ -210,27 +204,26 @@ def test_delete_user_rejects_last_owner(mock_cognito_delete):
     user_id = user.id
     session.close()
 
-    session = SessionLocal()
     try:
-        with pytest.raises(ValueError, match="last owner"):
-            delete_user(user_id, session)
+        async with AsyncSessionLocal() as adb:
+            with pytest.raises(ValueError, match="last owner"):
+                await delete_user(user_id, adb)
         mock_cognito_delete.assert_not_called()
     finally:
-        session.close()
-        Base.metadata.drop_all(engine)
+        Base.metadata.drop_all(sync_engine)
 
 
 @patch("app.auth_usermanagement.services.cognito_admin_service.admin_delete_user")
-def test_delete_user_not_found(mock_cognito_delete):
-    engine, SessionLocal = _make_db()
+@pytest.mark.asyncio
+async def test_delete_user_not_found(mock_cognito_delete):
+    sync_engine, SyncSession, async_engine, AsyncSessionLocal = _make_db()
 
-    session = SessionLocal()
     try:
-        with pytest.raises(ValueError, match="not found"):
-            delete_user(uuid4(), session)
+        async with AsyncSessionLocal() as adb:
+            with pytest.raises(ValueError, match="not found"):
+                await delete_user(uuid4(), adb)
     finally:
-        session.close()
-        Base.metadata.drop_all(engine)
+        Base.metadata.drop_all(sync_engine)
 
 
 # ── create_invited_cognito_user tests ─────────────────────────────────

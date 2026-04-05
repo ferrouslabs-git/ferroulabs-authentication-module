@@ -3,9 +3,6 @@ from unittest.mock import AsyncMock
 from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
 
 from app.database import Base, get_db
 from app.main import app
@@ -13,6 +10,7 @@ from app.auth_usermanagement.models.membership import Membership
 from app.auth_usermanagement.models.tenant import Tenant
 from app.auth_usermanagement.models.user import User
 from app.auth_usermanagement.security import dependencies as security_dependencies
+from tests.async_test_utils import make_test_db
 
 
 def _seed_user_and_tenants(db_session):
@@ -46,24 +44,15 @@ def _seed_user_and_tenants(db_session):
 
 
 def test_tenant_context_endpoint_allows_member_tenant(monkeypatch):
-    engine = create_engine(
-        "sqlite://",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
-    SessionLocal = sessionmaker(bind=engine)
-    Base.metadata.create_all(engine)
+    sync_engine, SyncSession, async_engine, AsyncSessionLocal = make_test_db()
 
-    seed_session = SessionLocal()
+    seed_session = SyncSession()
     seeded = _seed_user_and_tenants(seed_session)
     seed_session.close()
 
-    def _override_get_db():
-        session = SessionLocal()
-        try:
+    async def _override_get_db():
+        async with AsyncSessionLocal() as session:
             yield session
-        finally:
-            session.close()
 
     monkeypatch.setattr(
         security_dependencies,
@@ -83,7 +72,7 @@ def test_tenant_context_endpoint_allows_member_tenant(monkeypatch):
             )
     finally:
         app.dependency_overrides.clear()
-        Base.metadata.drop_all(engine)
+        Base.metadata.drop_all(sync_engine)
 
     assert response.status_code == 200
     payload = response.json()
@@ -92,24 +81,15 @@ def test_tenant_context_endpoint_allows_member_tenant(monkeypatch):
 
 
 def test_tenant_context_endpoint_blocks_cross_tenant_access(monkeypatch):
-    engine = create_engine(
-        "sqlite://",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
-    SessionLocal = sessionmaker(bind=engine)
-    Base.metadata.create_all(engine)
+    sync_engine, SyncSession, async_engine, AsyncSessionLocal = make_test_db()
 
-    seed_session = SessionLocal()
+    seed_session = SyncSession()
     seeded = _seed_user_and_tenants(seed_session)
     seed_session.close()
 
-    def _override_get_db():
-        session = SessionLocal()
-        try:
+    async def _override_get_db():
+        async with AsyncSessionLocal() as session:
             yield session
-        finally:
-            session.close()
 
     monkeypatch.setattr(
         security_dependencies,
@@ -129,7 +109,7 @@ def test_tenant_context_endpoint_blocks_cross_tenant_access(monkeypatch):
             )
     finally:
         app.dependency_overrides.clear()
-        Base.metadata.drop_all(engine)
+        Base.metadata.drop_all(sync_engine)
 
     assert response.status_code == 403
     assert "Access denied" in response.text

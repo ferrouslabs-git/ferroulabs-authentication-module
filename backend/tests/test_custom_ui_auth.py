@@ -303,12 +303,12 @@ class TestInvitationCognitoPreCreation:
             target_scope_id=tenant_id,
             tenant=SimpleNamespace(name="Test Tenant"),
         )
-        mock_create_inv = MagicMock(return_value=(fake_invitation, "raw_token_abc"))
+        mock_create_inv = AsyncMock(return_value=(fake_invitation, "raw_token_abc"))
 
         with patch("app.auth_usermanagement.api.route_helpers.get_settings", return_value=settings), \
              patch("app.auth_usermanagement.api.route_helpers.create_invitation", mock_create_inv), \
              patch("app.auth_usermanagement.api.route_helpers.send_invitation_email", mock_email), \
-             patch("app.auth_usermanagement.api.route_helpers.log_audit_event"), \
+             patch("app.auth_usermanagement.api.route_helpers.log_audit_event", new_callable=AsyncMock), \
              patch("app.auth_usermanagement.services.cognito_admin_service.create_invited_cognito_user_async", mock_cognito):
             result = asyncio.run(
                 create_invitation_response(MagicMock(), tenant_id, invite_data, current_user)
@@ -356,12 +356,12 @@ class TestInvitationCognitoPreCreation:
             target_scope_id=tenant_id,
             tenant=SimpleNamespace(name="Test Tenant"),
         )
-        mock_create_inv = MagicMock(return_value=(fake_invitation, "raw_token_abc"))
+        mock_create_inv = AsyncMock(return_value=(fake_invitation, "raw_token_abc"))
 
         with patch("app.auth_usermanagement.api.route_helpers.get_settings", return_value=settings), \
              patch("app.auth_usermanagement.api.route_helpers.create_invitation", mock_create_inv), \
              patch("app.auth_usermanagement.api.route_helpers.send_invitation_email", mock_email), \
-             patch("app.auth_usermanagement.api.route_helpers.log_audit_event"), \
+             patch("app.auth_usermanagement.api.route_helpers.log_audit_event", new_callable=AsyncMock), \
              patch("app.auth_usermanagement.services.cognito_admin_service.create_invited_cognito_user_async", mock_cognito):
             result = asyncio.run(
                 create_invitation_response(MagicMock(), tenant_id, invite_data, current_user)

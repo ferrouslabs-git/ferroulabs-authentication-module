@@ -7,7 +7,8 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy.orm import Session
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models.audit_event import AuditEvent
 
@@ -31,8 +32,8 @@ def _parse_uuid(value: str | UUID | None) -> UUID | None:
         return None
 
 
-def list_audit_events(
-    db: Session,
+async def list_audit_events(
+    db: AsyncSession,
     *,
     action: str | None = None,
     actor_user_id: str | None = None,
@@ -41,25 +42,22 @@ def list_audit_events(
     offset: int = 0,
 ) -> list[dict]:
     """Query audit events with optional filters."""
-    query = db.query(AuditEvent)
+    stmt = select(AuditEvent)
 
     if action:
-        query = query.filter(AuditEvent.action == action)
+        stmt = stmt.where(AuditEvent.action == action)
     if actor_user_id:
         parsed = _parse_uuid(actor_user_id)
         if parsed:
-            query = query.filter(AuditEvent.actor_user_id == parsed)
+            stmt = stmt.where(AuditEvent.actor_user_id == parsed)
     if tenant_id:
         parsed = _parse_uuid(tenant_id)
         if parsed:
-            query = query.filter(AuditEvent.tenant_id == parsed)
+            stmt = stmt.where(AuditEvent.tenant_id == parsed)
 
-    events = (
-        query.order_by(AuditEvent.timestamp.desc())
-        .offset(offset)
-        .limit(limit)
-        .all()
-    )
+    stmt = stmt.order_by(AuditEvent.timestamp.desc()).offset(offset).limit(limit)
+    result = await db.execute(stmt)
+    events = result.scalars().all()
 
     return [
         {
@@ -77,10 +75,10 @@ def list_audit_events(
     ]
 
 
-def log_audit_event(
+async def log_audit_event(
     event: str,
     actor_user_id: str | UUID | None = None,
-    db: Session | None = None,
+    db: AsyncSession | None = None,
     **details: Any,
 ) -> None:
     """
@@ -119,6 +117,6 @@ def log_audit_event(
                 metadata_json=details,
             )
         )
-        db.flush()
+        await db.flush()
     except Exception:
         logger.exception("Failed to persist audit event", extra={"event": event})

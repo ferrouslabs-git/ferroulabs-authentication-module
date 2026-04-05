@@ -3,8 +3,8 @@ Authentication dependencies for FastAPI endpoints
 """
 from fastapi import Depends, HTTPException, status, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from sqlalchemy import text
-from sqlalchemy.orm import Session
+from sqlalchemy import text, select
+from sqlalchemy.ext.asyncio import AsyncSession
 from uuid import UUID
 
 from ..database import get_db
@@ -25,32 +25,10 @@ oauth2_scheme = HTTPBearer(auto_error=False)
 
 async def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(oauth2_scheme),
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_db)
 ) -> User:
     """
     Verify JWT token and return current authenticated user.
-    
-    This dependency:
-    1. Extracts token from Authorization header
-    2. Verifies JWT signature and claims
-    3. Loads user from database
-    4. Returns User object for use in endpoints
-    
-    Usage:
-        @router.get("/me")
-        async def get_profile(current_user: User = Depends(get_current_user)):
-            return {"email": current_user.email}
-    
-    Args:
-        credentials: HTTP bearer token from Authorization header
-        db: Database session
-    
-    Returns:
-        User: Authenticated user from database
-    
-    Raises:
-        HTTPException 401: If token is invalid or expired
-        HTTPException 404: If user not found in database
     """
     if not credentials:
         raise HTTPException(
@@ -66,7 +44,7 @@ async def get_current_user(
     token_payload = await verify_token_async(token)
     
     # Load user from database
-    user = get_user_by_cognito_sub(token_payload.sub, db)
+    user = await get_user_by_cognito_sub(token_payload.sub, db)
     
     if not user:
         raise HTTPException(
@@ -87,18 +65,10 @@ async def get_current_user(
 
 async def get_current_user_optional(
     credentials: HTTPAuthorizationCredentials = Depends(oauth2_scheme),
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_db)
 ) -> User | None:
     """
     Optional authentication - returns User if token valid, None if missing/invalid.
-    Useful for endpoints that support both authenticated and anonymous access.
-    
-    Args:
-        credentials: HTTP bearer token from Authorization header (optional)
-        db: Database session
-    
-    Returns:
-        User if authenticated, None otherwise
     """
     if not credentials:
         return None
@@ -106,7 +76,7 @@ async def get_current_user_optional(
     try:
         token = credentials.credentials
         token_payload = await verify_token_async(token)
-        return get_user_by_cognito_sub(token_payload.sub, db)
+        return await get_user_by_cognito_sub(token_payload.sub, db)
     except HTTPException:
         return None
 
@@ -131,10 +101,10 @@ _ACCOUNT_SPACE_INHERITANCE: dict[str, str] = {
 
 # ── get_scope_context (v3.0) ─────────────────────────────────────
 
-def get_scope_context(
+async def get_scope_context(
     request: Request,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
 ) -> ScopeContext:
     """
     Resolve the current request's scope context (v3.0).
@@ -166,11 +136,11 @@ def get_scope_context(
             is_super_admin=True,
         )
         request.state.scope_context = ctx
-        _set_rls_vars(db, scope_type, scope_id, is_super_admin=True)
+        await _set_rls_vars(db, scope_type, scope_id, is_super_admin=True)
         return ctx
 
     # Resolve memberships → roles → permissions
-    active_roles = _resolve_active_roles(db, current_user, scope_type, scope_id)
+    active_roles = await _resolve_active_roles(db, current_user, scope_type, scope_id)
 
     if not active_roles:
         raise HTTPException(
@@ -192,7 +162,7 @@ def get_scope_context(
         is_super_admin=False,
     )
     request.state.scope_context = ctx
-    _set_rls_vars(db, scope_type, scope_id, is_super_admin=False)
+    await _set_rls_vars(db, scope_type, scope_id, is_super_admin=False)
     return ctx
 
 
@@ -231,20 +201,22 @@ def _parse_scope_headers(request: Request) -> tuple[str, UUID]:
     return scope_type, scope_id
 
 
-def _resolve_active_roles(
-    db: Session,
+async def _resolve_active_roles(
+    db: AsyncSession,
     current_user: User,
     scope_type: str,
     scope_id: UUID,
 ) -> list[str]:
     """Query memberships and resolve active role names for the requested scope."""
-    # New-style scope columns
-    memberships = db.query(Membership).filter(
-        Membership.user_id == current_user.id,
-        Membership.scope_type == scope_type,
-        Membership.scope_id == scope_id,
-        Membership.status == "active",
-    ).all()
+    result = await db.execute(
+        select(Membership).where(
+            Membership.user_id == current_user.id,
+            Membership.scope_type == scope_type,
+            Membership.scope_id == scope_id,
+            Membership.status == "active",
+        )
+    )
+    memberships = result.scalars().all()
 
     active_roles: list[str] = []
     for m in memberships:
@@ -252,29 +224,33 @@ def _resolve_active_roles(
 
     # Space-scope inheritance from parent account
     if scope_type == "space":
-        inherited = _resolve_space_inheritance(db, current_user, scope_id)
+        inherited = await _resolve_space_inheritance(db, current_user, scope_id)
         active_roles.extend(inherited)
 
     return active_roles
 
 
-def _resolve_space_inheritance(
-    db: Session,
+async def _resolve_space_inheritance(
+    db: AsyncSession,
     current_user: User,
     space_id: UUID,
 ) -> list[str]:
     """Check parent account memberships for inherited space roles."""
-    space = db.query(Space).filter(Space.id == space_id).first()
+    result = await db.execute(select(Space).where(Space.id == space_id))
+    space = result.scalar_one_or_none()
     if not space or not space.account_id:
         return []
 
     # New-style account memberships
-    account_memberships = db.query(Membership).filter(
-        Membership.user_id == current_user.id,
-        Membership.scope_type == "account",
-        Membership.scope_id == space.account_id,
-        Membership.status == "active",
-    ).all()
+    acct_result = await db.execute(
+        select(Membership).where(
+            Membership.user_id == current_user.id,
+            Membership.scope_type == "account",
+            Membership.scope_id == space.account_id,
+            Membership.status == "active",
+        )
+    )
+    account_memberships = acct_result.scalars().all()
 
     config = get_auth_config()
     member_access = config.inheritance_config.get("account_member_space_access", "none")
@@ -292,24 +268,25 @@ def _resolve_space_inheritance(
     return inherited
 
 
-def _set_rls_vars(
-    db: Session,
+async def _set_rls_vars(
+    db: AsyncSession,
     scope_type: str,
     scope_id: UUID,
     is_super_admin: bool,
 ) -> None:
     """Set PostgreSQL RLS session variables for row-level security."""
-    bind = db.get_bind()
-    if bind is None or bind.dialect.name != "postgresql":
+    # For async sessions, check dialect via the engine
+    dialect_name = db.bind.dialect.name if db.bind else None
+    if dialect_name != "postgresql":
         return
 
-    db.execute(text("SET LOCAL app.current_scope_type = :st"), {"st": scope_type})
-    db.execute(text("SET LOCAL app.current_scope_id = :sid"), {"sid": str(scope_id)})
-    db.execute(text("SET LOCAL app.is_super_admin = :sa"),
+    await db.execute(text("SET LOCAL app.current_scope_type = :st"), {"st": scope_type})
+    await db.execute(text("SET LOCAL app.current_scope_id = :sid"), {"sid": str(scope_id)})
+    await db.execute(text("SET LOCAL app.is_super_admin = :sa"),
                {"sa": "true" if is_super_admin else "false"})
     # Backward compat: existing RLS policies use these variables
-    db.execute(text("SET LOCAL app.current_tenant_id = :tid"), {"tid": str(scope_id)})
-    db.execute(text("SET LOCAL app.is_platform_admin = :ia"),
+    await db.execute(text("SET LOCAL app.current_tenant_id = :tid"), {"tid": str(scope_id)})
+    await db.execute(text("SET LOCAL app.is_platform_admin = :ia"),
                {"ia": "true" if is_super_admin else "false"})
 
 
@@ -318,16 +295,16 @@ def _set_rls_vars(
 # TODO: Remove after 2026-05-20 (60 days from v3.0 release).
 # ──────────────────────────────────────────────────────────────────
 
-def get_tenant_context(
+async def get_tenant_context(
     request: Request,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
 ) -> TenantContext:
     """DEPRECATED: Use get_scope_context instead. Remove after 2026-05-20."""
     if hasattr(request.state, "tenant_context"):
         return request.state.tenant_context
 
-    scope_ctx = get_scope_context(request, current_user, db)
+    scope_ctx = await get_scope_context(request, current_user, db)
 
     role = None
     if scope_ctx.active_roles:
